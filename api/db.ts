@@ -1,5 +1,5 @@
 import type { Client } from '@libsql/client'
-import { createClient } from '@libsql/client/http'
+import { createClient } from '@tursodatabase/serverless/compat'
 import { createInitialState } from '../src/state/defaults.ts'
 import { createId } from '../src/lib/id.ts'
 import { hashPassword } from './password.ts'
@@ -85,7 +85,7 @@ function createRemoteClient(): Client {
   return createClient({
     url,
     authToken: process.env.TURSO_AUTH_TOKEN,
-  })
+  }) as unknown as Client
 }
 
 function getClient(): Promise<Client> {
