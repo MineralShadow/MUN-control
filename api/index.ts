@@ -1,11 +1,21 @@
-import { app } from './app.ts'
-
-/**
- * Vercel Node.js Function：新运行时用命名 HTTP 方法导出，并传入 Web Request。
- * 不要用 default function / default { fetch }，否则会被当成 Edge 或 Node (req,res)，
- * 导致 Node 内置模块（crypto、Buffer 等）不可用或请求挂起。
- */
-const handler = (request: Request) => app.fetch(request)
+const handler = async (request: Request) => {
+  try {
+    // 动态导入：如果模块加载阶段抛错，可以把真实错误返回给诊断请求，
+    // 而不是让 Vercel 只显示 FUNCTION_INVOCATION_FAILED。
+    const { app } = await import('./app.ts')
+    return await app.fetch(request)
+  } catch (error) {
+    console.error('[api]', error)
+    return Response.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      { status: 500 },
+    )
+  }
+}
 
 export const GET = handler
 export const HEAD = handler
