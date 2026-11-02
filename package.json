@@ -1,0 +1,32 @@
+{
+  "name": "mun-conference-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "模拟联合国历史委员会会场控制台",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node --experimental-strip-types server/dev.ts",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.6",
+    "@libsql/client": "0.18.0",
+    "hono": "4.13.16",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "typescript": "~5.9.3",
+    "vite": "8.3.5"
+  }
+}

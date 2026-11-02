@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: manipulation">
+    <title>议题态度分析器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        /* 保持原有所有样式不变，仅新增选中高亮样式 */
+        :root {
+            --bg: #f5f6f8;
+            --card-bg: #ffffff;
+            --sidebar-bg: #ffffff;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --border: #e2e8f0;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --column-against: #fef2f2;
+            --column-neutral: #f8fafc;
+            --column-support: #f0fdf4;
+            --drag-overlay-bg: rgba(0,0,0,0.05);
+            --tag-bg: #f1f5f9;
+            --filter-active-bg: #eef2ff;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+        body.dark {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --sidebar-bg: #1e293b;
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --border: #334155;
+            --accent: #818cf8;
+            --accent-hover: #6366f1;
+            --column-against: #450a0a;
+            --column-neutral: #1e293b;
+            --column-support: #052e16;
+            --drag-overlay-bg: rgba(255,255,255,0.08);
+            --tag-bg: #334155;
+            --filter-active-bg: #312e81;
+        }
+        body.leftist {
+            --bg: #3a1a1a;
+            --card-bg: #4a2a2a;
+            --sidebar-bg: #3d2020;
+            --text: #f5c542;
+            --text-secondary: #d4a830;
+            --border: #6b3a3a;
+            --accent: #e63946;
+            --accent-hover: #c53030;
+            --column-against: #5a2020;
+            --column-neutral: #4a2a2a;
+            --column-support: #3a4a20;
+            --drag-overlay-bg: rgba(230,57,70,0.2);
+            --tag-bg: #5a2a2a;
+            --filter-active-bg: #7a4020;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg); color: var(--text); min-height:100vh; display:flex; line-height:1.5;
+            transition: background 0.3s, color 0.3s;
+            user-select: none;
+        }
+        .app-header { position: fixed; top:0; left:0; right:0; height:48px; background: var(--sidebar-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:center; z-index:50; padding:0 16px; }
+        .app-title { font-size:1.2rem; font-weight:700; border:none; background:transparent; color:var(--text); text-align:center; outline:none; width:100%; max-width:400px; padding:4px 8px; border-radius:6px; }
+        body { padding-top:48px; }
+        .sidebar { width: 310px; min-width: 310px; height:calc(100vh - 48px); position:sticky; top:48px; background: var(--sidebar-bg); border-right:1px solid var(--border); display:flex; flex-direction:column; z-index:10; overflow-y:auto; }
+        .sidebar-header { padding:20px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+        .logo-icon { width:36px; height:36px; border-radius:8px; background:linear-gradient(135deg,#6366f1,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:20px; color:#fff; }
+        .sidebar h2 { font-size:1.1rem; font-weight:700; }
+        .sidebar-section { padding:16px 20px; border-bottom:1px solid var(--border); }
+        .section-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-secondary); font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+        .add-form { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+        .add-form input { flex:1; padding:8px 10px; border:2px solid var(--border); border-radius:20px; font-size:0.9rem; background:var(--card-bg); color:var(--text); min-width:0; }
+        .color-picker-btn { width:34px; height:34px; border-radius:50%; cursor:pointer; border:2px solid var(--border); flex-shrink:0; position:relative; overflow:hidden; }
+        .color-picker-btn input[type="color"] { opacity:0; position:absolute; width:100%; height:100%; cursor:pointer; }
+        .btn { padding:8px 14px; border:none; border-radius:20px; cursor:pointer; font-size:0.88rem; font-weight:600; transition:0.2s; }
+        .btn-primary { background:var(--accent); color:#fff; }
+        .item-list { display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; }
+        .item-row { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:20px; background:var(--card-bg); border:2px solid transparent; transition:0.2s; }
+        .color-dot { width:20px; height:20px; border-radius:50%; flex-shrink:0; }
+        .item-name { flex:1; font-weight:500; font-size:0.9rem; }
+        .votes-control { display:flex; align-items:center; gap:4px; }
+        .votes-control button { width:22px; height:22px; border-radius:50%; border:1px solid var(--border); background:var(--card-bg); font-size:14px; cursor:pointer; color:var(--text); font-weight:600; }
+        .votes-control .votes-value { cursor:pointer; font-weight:600; min-width:20px; text-align:center; }
+        .item-actions { display:flex; gap:2px; }
+        .btn-icon { background:transparent; color:var(--text-secondary); padding:4px 8px; border-radius:50%; border:none; cursor:pointer; }
+        .main-content { flex:1; padding:20px 24px 40px; overflow-y:auto; min-width:0; }
+        .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; padding:12px 16px; background:var(--card-bg); border-radius:var(--radius-lg); box-shadow:0 4px 16px rgba(0,0,0,0.06); }
+        .btn-outline { padding:6px 14px; border-radius:20px; border:2px solid var(--border); background:var(--card-bg); font-size:0.8rem; font-weight:600; cursor:pointer; color:var(--text); }
+        .topics-list { display:flex; flex-direction:column; gap:18px; }
+        .topic-card { background:var(--card-bg); border-radius:var(--radius-lg); box-shadow:0 4px 16px rgba(0,0,0,0.06); border:1px solid var(--border); overflow:hidden; }
+        .topic-card-header { padding:14px 18px 8px; display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+        .topic-title-input { flex:1; font-size:1rem; font-weight:700; border:none; background:transparent; padding:4px 8px; border-radius:6px; min-width:150px; color:var(--text); }
+        .voting-btn { font-size:0.8rem; background:var(--accent); color:#fff; border:none; border-radius:16px; padding:5px 12px; cursor:pointer; font-weight:600; }
+        .topic-pies { display:flex; gap:8px; align-items:center; }
+        .mini-pie canvas { width:36px; height:36px; border-radius:50%; }
+        .topic-tags-row { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+        .topic-tag-badge { padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:600; color:#fff; }
+        .add-tag-btn { font-size:0.7rem; cursor:pointer; color:var(--accent); background:var(--filter-active-bg); padding:2px 8px; border-radius:12px; border:none; }
+        .btn-delete-topic { width:30px; height:30px; border-radius:50%; border:none; background:transparent; color:var(--text-secondary); cursor:pointer; font-size:1.1rem; }
+        .topic-desc { padding:2px 18px 6px; }
+        .topic-desc-textarea { width:100%; border:none; background:transparent; font-size:0.85rem; color:var(--text-secondary); resize:none; padding:4px 6px; border-radius:6px; font-family:inherit; min-height:30px; }
+        .three-columns { display:grid; grid-template-columns:1fr 1fr 1fr; border-top:1px solid var(--border); min-height:80px; }
+        .attitude-column { padding:12px 10px 14px; display:flex; flex-direction:column; gap:6px; }
+        .attitude-column + .attitude-column { border-left:1px solid var(--border); }
+        .attitude-column.against { background:var(--column-against); }
+        .attitude-column.neutral { background:var(--column-neutral); }
+        .attitude-column.support { background:var(--column-support); }
+        .column-label { font-weight:700; font-size:0.7rem; text-transform:uppercase; text-align:center; }
+        .column-tags { display:flex; flex-wrap:wrap; gap:5px; flex:1; min-height:30px; padding:4px; border-radius:6px; border:2px dashed transparent; }
+        .column-tags.drag-hover { border-color:var(--accent); background:var(--drag-overlay-bg); }
+        .group-tag { display:inline-flex; align-items:center; gap:4px; padding:5px 10px; border-radius:16px; font-size:0.78rem; font-weight:600; user-select:none; box-shadow:0 1px 2px rgba(0,0,0,0.05); border:1px solid rgba(0,0,0,0.06); }
+        .tag-votes-badge { background:rgba(0,0,0,0.1); border-radius:10px; padding:1px 6px; font-size:0.7rem; font-weight:700; margin-left:2px; display:inline-flex; align-items:center; gap:2px; }
+        .tag-votes-badge .vote-num { cursor:pointer; }
+        .tag-remove-btn { margin-left:2px; width:16px; height:16px; border-radius:50%; background:rgba(0,0,0,0.08); display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer; }
+        .drag-ghost { position:fixed; pointer-events:none; z-index:1000; opacity:0.9; transform:translate(-50%, -50%); padding:6px 14px; border-radius:20px; font-size:0.85rem; font-weight:600; box-shadow:0 8px 20px rgba(0,0,0,0.15); white-space:nowrap; }
+        .summary-section { margin-top:24px; padding:18px; background:var(--card-bg); border-radius:var(--radius-lg); box-shadow:0 4px 16px rgba(0,0,0,0.06); display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
+        .summary-pie { display:flex; align-items:center; gap:8px; }
+        .summary-pie canvas { width:80px; height:80px; border-radius:50%; }
+        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.25); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:1000; }
+        .modal { background:var(--card-bg); border-radius:var(--radius-lg); box-shadow:0 12px 32px rgba(0,0,0,0.2); width:90%; max-width:500px; padding:24px; display:flex; flex-direction:column; gap:16px; color:var(--text); }
+        .toast-container { position:fixed; top:20px; right:20px; z-index:2000; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+        .toast { background:#1e293b; color:#fff; padding:10px 18px; border-radius:8px; font-size:0.85rem; animation:toastIn 0.3s, toastOut 0.3s 2s forwards; }
+        @keyframes toastIn{from{opacity:0;transform:translateX(40px);}to{opacity:1;transform:translateX(0);}}
+        @keyframes toastOut{from{opacity:1;transform:translateX(0);}to{opacity:0;transform:translateX(40px);}}
+        .vote-input { width:40px; background:rgba(255,255,255,0.15); border:1px solid var(--border); border-radius:4px; color:var(--text); text-align:center; font-size:0.7rem; }
+        .editable-name { cursor: pointer; }
+        .filter-tag.active { border-color: var(--accent) !important; background: var(--filter-active-bg) !important; box-shadow: 0 0 0 2px var(--accent); font-weight: 700; }
+        .parliament-modal .modal { max-width: 650px; }
+        .parliament-group-row { display: flex; align-items: center; gap: 8px; }
+        .parliament-group-row input { width: 60px; }
+        canvas#parliamentCanvas { background: var(--card-bg); border-radius: 8px; width: 100%; height: auto; cursor: pointer; }
+        .parliament-group-row.selected { background: var(--filter-active-bg); border-radius: 8px; }
+    
+        .filter-tag-btn {
+            border:none;
+            border-radius:999px;
+            padding:8px 14px;
+            font-size:0.82rem;
+            font-weight:700;
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            transition:0.2s;
+            background:var(--tag-bg);
+            color:var(--text);
+            border:2px solid transparent;
+        }
+        .filter-tag-btn.active{
+            border-color:var(--accent);
+            background:var(--filter-active-bg);
+            transform:translateY(-1px);
+        }
+        .color-dot.editable-color{
+            cursor:pointer;
+            position:relative;
+        }
+        .voting-fullscreen{
+            min-height:calc(100vh - 120px);
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            align-items:center;
+            gap:28px;
+            text-align:center;
+            padding:24px;
+        }
+        .voting-circles{
+            display:flex;
+            gap:28px;
+            flex-wrap:wrap;
+            justify-content:center;
+        }
+        .vote-circle{
+            width:180px;
+            height:180px;
+            border-radius:50%;
+            border:none;
+            color:#fff;
+            font-size:1.4rem;
+            font-weight:800;
+            cursor:pointer;
+            transition:0.2s;
+            box-shadow:0 8px 24px rgba(0,0,0,0.18);
+        }
+        .vote-circle:hover{
+            transform:scale(1.05);
+        }
+        .vote-banner{
+            width:min(900px,95%);
+            border-radius:20px;
+            padding:22px;
+            font-size:2rem;
+            font-weight:900;
+            text-align:center;
+            color:#fff;
+            animation:bannerIn .35s ease;
+        }
+        @keyframes bannerIn{
+            from{opacity:0;transform:translateY(-20px);}
+            to{opacity:1;transform:translateY(0);}
+        }
+
+</style>
+</head>
+<body>
+<div class="app-header"><input class="app-title" id="appTitle" value="议题态度分析器" spellcheck="false"></div>
+<aside class="sidebar">
+    <div class="sidebar-header"><div class="logo-icon">⚖️</div><h2>团体与标签</h2></div>
+    <div class="sidebar-section">
+        <div class="section-label"><span class="dot"></span>添加团体</div>
+        <div class="add-form">
+            <input type="text" id="groupNameInput" placeholder="团体名称" maxlength="30">
+            <div class="color-picker-btn" id="groupColorBtn"><input type="color" id="groupColorPicker" value="#6366f1"></div>
+            <button class="btn btn-primary" id="btnAddGroup">＋</button>
+        </div>
+        <div class="item-list" id="groupList"></div>
+    </div>
+    <div class="sidebar-section">
+        <div class="section-label"><span class="dot"></span>标签管理</div>
+        <div class="add-form">
+            <input type="text" id="tagNameInput" placeholder="标签名称" maxlength="15">
+            <div class="color-picker-btn" id="tagColorBtn"><input type="color" id="tagColorPicker" value="#f59e0b"></div>
+            <button class="btn" id="btnAddTag" style="background:#10b981;color:#fff;">＋</button>
+        </div>
+        <div class="item-list" id="tagList"></div>
+    </div>
+</aside>
+<main class="main-content" id="mainContent">
+    <div class="toolbar">
+        <button class="btn-outline" id="btnStylePicker">🎨 风格</button>
+        <button class="btn-outline" id="btnAdvancedFilter">🔍 高级筛选</button>
+        <button class="btn-outline" id="btnClearAdvancedFilter">清除筛选</button>
+        <button class="btn-outline" id="btnParliament">🏛️ 议会席位</button>
+        <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn-outline" id="btnExportJSON">📁 导出JSON</button>
+            <button class="btn-outline" id="btnImportJSON">📂 导入JSON</button>
+            <button class="btn-outline" id="btnExportPNG">🖼️ 导出长图</button>
+        </div>
+        <button class="btn btn-primary" id="btnAddTopic">＋ 新议题</button>
+    </div>
+    <div id="exportArea">
+        <div id="viewContainer"></div>
+    </div>
+</main>
+
+<!-- 弹窗 -->
+<div class="modal-overlay" id="styleModal" style="display:none;">
+    <div class="modal"><h3>选择界面风格</h3><div class="style-option" data-style="light">☀️ 白天模式</div><div class="style-option" data-style="dark">🌙 黑夜模式</div><div class="style-option" data-style="leftist">✊🏿⚒️ 黑红黄左派</div><div class="modal-actions"><button class="btn" id="styleModalCancel">取消</button></div></div>
+</div>
+<div class="modal-overlay" id="advancedFilterModal" style="display:none;">
+    <div class="modal"><h3>高级标签筛选</h3><div class="filter-row"><div class="row-label">✅ 必须包含的标签</div><div class="tag-options" id="mustIncludeTags"></div></div><div class="filter-row"><div class="row-label">🔹 可以包含的标签</div><div class="tag-options" id="mayIncludeTags"></div></div><div class="filter-row"><div class="row-label">🚫 排除的标签</div><div class="tag-options" id="excludeTags"></div></div><div class="modal-actions"><button class="btn" id="advancedFilterCancel">取消</button><button class="btn btn-primary" id="advancedFilterApply">应用</button></div></div>
+</div>
+<div class="modal-overlay" id="modalConfirm" style="display:none;"><div class="modal"><h3 id="modalTitle"></h3><p id="modalMessage"></p><div class="modal-actions"><button class="btn" id="modalCancelBtn">取消</button><button class="btn btn-primary" id="modalOkBtn">确认</button></div></div></div>
+<div class="modal-overlay" id="topicModal" style="display:none;"><div class="modal"><h3>📝 新建议题</h3><input type="text" id="modalTitleInput" placeholder="议题标题" maxlength="80"><textarea id="modalDescInput" placeholder="议题描述" rows="3"></textarea><div class="modal-actions"><button class="btn" id="modalTopicCancel">取消</button><button class="btn btn-primary" id="modalTopicConfirm">创建</button></div></div></div>
+<div class="modal-overlay" id="tagSelectModal" style="display:none;"><div class="modal"><h3>选择标签</h3><div id="tagSelectList" style="display:flex;flex-wrap:wrap;gap:8px;"></div><div class="modal-actions"><button class="btn" id="modalTagCancel">取消</button><button class="btn btn-primary" id="modalTagDone">完成</button></div></div></div>
+<div class="modal-overlay parliament-modal" id="parliamentModal" style="display:none;">
+    <div class="modal">
+        <h3>🏛️ 议会席位图</h3>
+        <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+            <label>总席位数：<input type="number" id="parliamentTotalSeats" min="1" value="100" style="width:80px;"></label>
+            <button class="btn btn-primary" id="btnAutoAllocate">按比例分配</button>
+            <button class="btn btn-primary" id="btnSaveConfig">💾 保存配置</button>
+        </div>
+        <div id="parliamentGroupInputs" style="max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+        <canvas id="parliamentCanvas" width="600" height="300" style="background: var(--card-bg); border-radius:8px; width:100%; height:auto;"></canvas>
+        <div class="modal-actions"><button class="btn" id="parliamentClose">关闭</button></div>
+    </div>
+</div>
+<input type="file" id="importFileInput" accept=".json" style="display:none;">
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+(function() {
+    // ==================== 数据状态 ====================
+    let state = {
+        groups: [],
+        tags: [],
+        topics: [],
+        nextGroupId: 1, nextTopicId: 1, nextTagId: 1,
+        votingView: null,
+        parliamentConfig: null,
+        lastVotingResult: null
+    };
+    let advancedFilter = { mustInclude: new Set(), mayInclude: new Set(), exclude: new Set() };
+    let currentStyle = 'light';
+
+    // 议会交互状态
+    let parliamentSeatData = []; // { x, y, r, groupId, color }
+    let selectedGroupId = null;   // 当前选中的团体ID（用于高亮）
+
+    const $ = id => document.getElementById(id);
+    const appTitle = $('appTitle');
+    const groupNameInput = $('groupNameInput');
+    const groupColorPicker = $('groupColorPicker');
+    const groupColorBtn = $('groupColorBtn');
+    const btnAddGroup = $('btnAddGroup');
+    const groupList = $('groupList');
+    const tagNameInput = $('tagNameInput');
+    const tagColorPicker = $('tagColorPicker');
+    const tagColorBtn = $('tagColorBtn');
+    const btnAddTag = $('btnAddTag');
+    const tagList = $('tagList');
+    const btnAddTopic = $('btnAddTopic');
+    const viewContainer = $('viewContainer');
+    const topicModal = $('topicModal');
+    const modalTitleInput = $('modalTitleInput');
+    const modalDescInput = $('modalDescInput');
+    const modalTopicConfirm = $('modalTopicConfirm');
+    const modalTopicCancel = $('modalTopicCancel');
+    const importFileInput = $('importFileInput');
+    const toastContainer = $('toastContainer');
+    const exportArea = $('exportArea');
+    const btnStylePicker = $('btnStylePicker');
+    const styleModal = $('styleModal');
+    const styleModalCancel = $('styleModalCancel');
+    const btnAdvancedFilter = $('btnAdvancedFilter');
+    const btnClearAdvancedFilter = $('btnClearAdvancedFilter');
+    const advancedFilterModal = $('advancedFilterModal');
+    const btnParliament = $('btnParliament');
+    const parliamentModal = $('parliamentModal');
+    const parliamentTotalSeats = $('parliamentTotalSeats');
+    const parliamentGroupInputs = $('parliamentGroupInputs');
+    const parliamentCanvas = $('parliamentCanvas');
+    const btnAutoAllocate = $('btnAutoAllocate');
+    const btnSaveConfig = $('btnSaveConfig');
+    const parliamentClose = $('parliamentClose');
+
+    const modalConfirm = $('modalConfirm'), modalTitleEl = $('modalTitle'), modalMessageEl = $('modalMessage');
+    const modalOkBtn = $('modalOkBtn'), modalCancelBtn = $('modalCancelBtn');
+    let confirmCb = null;
+    function showConfirm(t,m,cb){ modalTitleEl.textContent=t; modalMessageEl.textContent=m; modalConfirm.style.display='flex'; confirmCb=cb; }
+    modalOkBtn.onclick=()=>{ modalConfirm.style.display='none'; if(confirmCb)confirmCb(); confirmCb=null; };
+    modalCancelBtn.onclick=()=>{ modalConfirm.style.display='none'; confirmCb=null; };
+
+    function showToast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; toastContainer.appendChild(t); setTimeout(()=>t.remove(),2400); }
+    function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+    function getContrast(hex){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return (0.299*r+0.587*g+0.114*b)/255>0.55?'#1a1a2e':'#ffffff'; }
+
+    // ==================== 团体/标签操作 ====================
+    function addGroup(){
+        const name=groupNameInput.value.trim(); if(!name) return showToast('⚠️请输入名称');
+        if(state.groups.some(g=>g.name===name)) return showToast('⚠️名称重复');
+        state.groups.push({id:'g_'+state.nextGroupId++, name, color:groupColorPicker.value, defaultVotes:1});
+        renderAll(); groupNameInput.value='';
+    }
+    function deleteGroup(id){
+        const g=state.groups.find(g=>g.id===id);
+        showConfirm('删除团体',`确定删除“${g.name}”？`,()=>{
+            state.groups=state.groups.filter(g=>g.id!==id);
+            state.topics.forEach(t=>{if(t.assignments) delete t.assignments[id];});
+            if(state.parliamentConfig && state.parliamentConfig.groupSeats) delete state.parliamentConfig.groupSeats[id];
+            if(selectedGroupId===id) selectedGroupId=null;
+            renderAll();
+        });
+    }
+    function updateGroupVotes(id,delta){
+        const g=state.groups.find(g=>g.id===id);
+        if(g){ g.defaultVotes=Math.max(0,(g.defaultVotes||1)+delta); renderAll(); }
+    }
+    function updateTopicGroupVotes(topicId,groupId,newVal){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(!topic) return;
+        if(!topic.assignments) topic.assignments={};
+        if(!topic.assignments[groupId]) topic.assignments[groupId]={attitude:'neutral'};
+        const defaultVotes=state.groups.find(g=>g.id===groupId)?.defaultVotes??1;
+        if(newVal===defaultVotes) delete topic.assignments[groupId].votes;
+        else topic.assignments[groupId].votes=newVal;
+        renderAll();
+    }
+    function getGroupVotesForTopic(groupId,topicId){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(topic?.assignments?.[groupId]?.votes!==undefined) return topic.assignments[groupId].votes;
+        return state.groups.find(g=>g.id===groupId)?.defaultVotes??1;
+    }
+    function addTag(){
+        const name=tagNameInput.value.trim(); if(!name) return showToast('⚠️请输入标签名');
+        if(state.tags.some(t=>t.name===name)) return showToast('⚠️标签重复');
+        state.tags.push({id:'tag_'+state.nextTagId++, name, color:tagColorPicker.value});
+        renderAll(); tagNameInput.value='';
+    }
+    function deleteTag(id){
+        const tag=state.tags.find(t=>t.id===id);
+        showConfirm('删除标签',`确定删除“${tag.name}”？`,()=>{
+            state.tags=state.tags.filter(t=>t.id!==id);
+            state.topics.forEach(t=>{t.tagIds=t.tagIds.filter(tid=>tid!==id);});
+            advancedFilter.mustInclude.delete(id); advancedFilter.mayInclude.delete(id); advancedFilter.exclude.delete(id);
+            renderAll();
+        });
+    }
+    function addTopic(){
+        const title=modalTitleInput.value.trim(); if(!title) return showToast('⚠️标题不能为空');
+        state.topics.push({id:'tp_'+state.nextTopicId++, title, description:modalDescInput.value, tagIds:[], assignments:{}});
+        topicModal.style.display='none'; renderAll();
+    }
+    function deleteTopic(id){
+        const topic=state.topics.find(t=>t.id===id);
+        showConfirm('删除议题',`确定删除“${topic.title}”？`,()=>{ state.topics=state.topics.filter(t=>t.id!==id); renderAll(); });
+    }
+    function assignGroup(topicId,groupId,attitude){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(!topic) return;
+        if(!topic.assignments) topic.assignments={};
+        if(topic.assignments[groupId]){
+            topic.assignments[groupId].attitude = attitude;
+        } else {
+            topic.assignments[groupId] = {attitude};
+        }
+        
+        renderAll();
+    }
+    function removeGroup(topicId,groupId){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(topic?.assignments) delete topic.assignments[groupId];
+        renderAll();
+    }
+    function moveGroup(topicId,groupId,newAtt){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(topic?.assignments?.[groupId]) topic.assignments[groupId].attitude=newAtt;
+        renderAll();
+    }
+
+    function getFilteredTopics(){
+        let topics=state.topics;
+        if(advancedFilter.mustInclude.size>0) topics=topics.filter(t=>t.tagIds&&[...advancedFilter.mustInclude].every(tid=>t.tagIds.includes(tid)));
+        if(advancedFilter.mayInclude.size>0) topics=topics.filter(t=>t.tagIds&&[...advancedFilter.mayInclude].some(tid=>t.tagIds.includes(tid)));
+        if(advancedFilter.exclude.size>0) topics=topics.filter(t=>!t.tagIds||![...advancedFilter.exclude].some(tid=>t.tagIds.includes(tid)));
+        return topics;
+    }
+
+    // 表决（保持不变）
+    function startVoting(topicId){ if(!state.topics.find(t=>t.id===topicId)) return; state.votingView = { topicId, currentIndex: 0 }; renderAll(); }
+    function stopVoting(){ state.votingView = null; renderAll(); }
+    function votingNextGroup(){
+        if(!state.votingView) return;
+        if(state.votingView.currentIndex < state.groups.length-1){ state.votingView.currentIndex++; renderAll(); }
+        else{ state.votingView = null; renderAll(); showToast('✅ 表决完成'); }
+    }
+    function setVotingAttitude(attitude){
+        if(!state.votingView) return;
+        const topicId = state.votingView.topicId;
+        const groupId = state.groups[state.votingView.currentIndex]?.id;
+        if(!groupId) return;
+        assignGroup(topicId, groupId, attitude);
+        votingNextGroup();
+    }
+
+    // 拖拽（保持不变）
+    let dragInfo=null, dragGhost=null, dragTimer=null;
+    function startDrag(e,data){
+        const touch=e.touches?e.touches[0]:e; dragInfo=data;
+        clearTimeout(dragTimer);
+        dragTimer=setTimeout(()=>{
+            if(!dragInfo) return;
+            const ghost=document.createElement('div'); ghost.className='drag-ghost';
+            if(dragInfo.groupId){
+                const g=state.groups.find(g=>g.id===dragInfo.groupId);
+                if(g){ ghost.style.background=g.color; ghost.style.color=getContrast(g.color); ghost.textContent=g.name; }
+            } else if(dragInfo.tagId){
+                const t=state.tags.find(t=>t.id===dragInfo.tagId);
+                if(t){ ghost.style.background=t.color; ghost.style.color=getContrast(t.color); ghost.textContent=t.name; }
+            }
+            document.body.appendChild(ghost); dragGhost=ghost;
+            moveGhost(touch.clientX,touch.clientY);
+            document.addEventListener('pointermove',onDragMove); document.addEventListener('pointerup',onDragEnd);
+            document.addEventListener('touchmove',onDragMove,{passive:false}); document.addEventListener('touchend',onDragEnd); document.addEventListener('touchcancel',onDragEnd);
+            dragInfo.dragging=true;
+        },300);
+    }
+
+    function moveGhost(x,y){ if(dragGhost){ dragGhost.style.left=x+'px'; dragGhost.style.top=y+'px'; } }
+
+    function onDragMove(e){ 
+        e.preventDefault(); const touch=e.touches?e.touches[0]:e; moveGhost(touch.clientX,touch.clientY); 
+        document.querySelectorAll('.column-tags').forEach(c=>c.classList.remove('drag-hover')); 
+        document.querySelectorAll('.item-row').forEach(r=>r.style.borderColor='transparent'); // 还原边框
+        const elem=document.elementFromPoint(touch.clientX,touch.clientY); 
+        if(elem){ 
+            const col=elem.closest('.column-tags'); if(col) col.classList.add('drag-hover'); 
+            const row=elem.closest('.item-row');
+            if(row && dragInfo){
+                if((dragInfo.groupId && row.dataset.gid && row.dataset.gid !== dragInfo.groupId) ||
+                   (dragInfo.tagId && row.dataset.tid && row.dataset.tid !== dragInfo.tagId)) {
+                    row.style.borderColor='var(--accent)';
+                }
+            }
+        } 
+    }
+
+    function cleanupDrag(){ 
+        clearTimeout(dragTimer); 
+        document.removeEventListener('pointermove',onDragMove); document.removeEventListener('pointerup',onDragEnd); 
+        document.removeEventListener('touchmove',onDragMove); document.removeEventListener('touchend',onDragEnd); document.removeEventListener('touchcancel',onDragEnd); 
+        if(dragGhost){ dragGhost.remove(); dragGhost=null; } 
+        document.querySelectorAll('.column-tags').forEach(c=>c.classList.remove('drag-hover')); 
+        document.querySelectorAll('.item-row').forEach(r=>r.style.borderColor='transparent');
+    }
+
+    function onDragEnd(e){ 
+        const touch=e.changedTouches?e.changedTouches[0]:e; 
+        const wasDragging=dragInfo?.dragging; 
+        const currentDragInfo = dragInfo; // 清理前捕获数据
+        cleanupDrag(); 
+        if(!wasDragging||!currentDragInfo){ dragInfo=null; return; } 
+        const target=document.elementFromPoint(touch.clientX,touch.clientY); 
+        if(!target){ dragInfo=null; return; } 
+
+        // 1. 判断是否悬停在侧边栏其他项以执行排序替换
+        const targetRow = target.closest('.item-row');
+        if(targetRow) {
+            if(currentDragInfo.groupId && targetRow.dataset.gid && currentDragInfo.groupId !== targetRow.dataset.gid) {
+                const fromIdx = state.groups.findIndex(g=>g.id===currentDragInfo.groupId);
+                const toIdx = state.groups.findIndex(g=>g.id===targetRow.dataset.gid);
+                if(fromIdx>-1 && toIdx>-1){
+                    const [moved] = state.groups.splice(fromIdx, 1);
+                    state.groups.splice(toIdx, 0, moved);
+                    renderAll();
+                }
+            } else if(currentDragInfo.tagId && targetRow.dataset.tid && currentDragInfo.tagId !== targetRow.dataset.tid) {
+                const fromIdx = state.tags.findIndex(t=>t.id===currentDragInfo.tagId);
+                const toIdx = state.tags.findIndex(t=>t.id===targetRow.dataset.tid);
+                if(fromIdx>-1 && toIdx>-1){
+                    const [moved] = state.tags.splice(fromIdx, 1);
+                    state.tags.splice(toIdx, 0, moved);
+                    renderAll();
+                }
+            }
+        }
+
+        // 2. 依然保留判断拖拽进入立场框分配团体
+        const col=target.closest('.column-tags'); 
+        if(col && currentDragInfo.groupId){ 
+            const topicId=col.dataset.tid, attitude=col.dataset.colAtt; 
+            if(currentDragInfo.topicId&&currentDragInfo.topicId!==topicId) assignGroup(topicId,currentDragInfo.groupId,attitude); 
+            else if(currentDragInfo.topicId) moveGroup(topicId,currentDragInfo.groupId,attitude); 
+            else assignGroup(topicId,currentDragInfo.groupId,attitude); 
+        } 
+        dragInfo=null; 
+    }
+
+    function bindDragEvents(){
+        document.querySelectorAll('.item-row[data-gid], .item-row[data-tid]').forEach(row=>{
+            row.onpointerdown=e=>{ if(e.target.closest('button')||e.target.closest('input')) return; e.preventDefault(); startDrag(e, row.dataset.gid ? {groupId:row.dataset.gid} : {tagId:row.dataset.tid}); };
+            row.addEventListener('touchstart',e=>{ if(e.target.closest('button')||e.target.closest('input')) return; startDrag(e, row.dataset.gid ? {groupId:row.dataset.gid} : {tagId:row.dataset.tid}); },{passive:false});
+            row.onpointerup=row.onpointerleave=()=>{ if(!dragInfo?.dragging) cleanupDrag(); };
+            row.addEventListener('touchend',()=>{ if(!dragInfo?.dragging) cleanupDrag(); });
+            row.addEventListener('touchcancel',cleanupDrag);
+        });
+        document.querySelectorAll('.group-tag').forEach(tag=>{
+            tag.onpointerdown=e=>{ if(e.target.closest('.tag-remove-btn')||e.target.closest('.tag-votes-badge')||e.target.closest('input')) return; e.preventDefault(); startDrag(e,{groupId:tag.dataset.gid, topicId:tag.dataset.tid}); };
+            tag.addEventListener('touchstart',e=>{ if(e.target.closest('.tag-remove-btn')||e.target.closest('.tag-votes-badge')||e.target.closest('input')) return; startDrag(e,{groupId:tag.dataset.gid, topicId:tag.dataset.tid}); },{passive:false});
+            tag.onpointerup=tag.onpointerleave=()=>{ if(!dragInfo?.dragging) cleanupDrag(); };
+            tag.addEventListener('touchend',()=>{ if(!dragInfo?.dragging) cleanupDrag(); });
+            tag.addEventListener('touchcancel',cleanupDrag);
+        });
+    }
+
+    function drawPie(canvas,values,colors){
+        const ctx=canvas.getContext('2d'); const w=canvas.width, h=canvas.height; ctx.clearRect(0,0,w,h);
+        const total=values.reduce((a,b)=>a+b,0);
+        if(total===0){ ctx.beginPath(); ctx.arc(w/2,h/2,w/2-2,0,Math.PI*2); ctx.fillStyle='#e2e8f0'; ctx.fill(); return; }
+        let start=-Math.PI/2;
+        values.forEach((v,i)=>{ const angle=(v/total)*Math.PI*2; ctx.beginPath(); ctx.moveTo(w/2,h/2); ctx.arc(w/2,h/2,w/2-2,start,start+angle); ctx.closePath(); ctx.fillStyle=colors[i]; ctx.fill(); start+=angle; });
+    }
+    function getTopicPieData(topicId){
+        const topic=state.topics.find(t=>t.id===topicId);
+        if(!topic) return {support:0,neutral:0,against:0};
+        let s=0,n=0,a=0;
+        if(topic.assignments) Object.entries(topic.assignments).forEach(([gid,ass])=>{ const v=getGroupVotesForTopic(gid,topicId); if(ass.attitude==='support') s+=v; else if(ass.attitude==='against') a+=v; else n+=v; });
+        return {support:s,neutral:n,against:a};
+    }
+    function getSummaryData(){
+        let s=0,n=0,a=0;
+        getFilteredTopics().forEach(topic=>{ if(topic.assignments) Object.entries(topic.assignments).forEach(([gid,ass])=>{ const v=getGroupVotesForTopic(gid,topic.id); if(ass.attitude==='support') s+=v; else if(ass.attitude==='against') a+=v; else n+=v; }); });
+        return {support:s,neutral:n,against:a};
+    }
+
+    function renderAll(){
+        renderSidebar();
+        if(state.votingView){ renderVotingView(); }
+        else { renderTopics(); renderSummary(); }
+        bindDragEvents();
+
+        document.querySelectorAll('[data-group-color]').forEach(el=>{
+            el.onclick = e=>{
+                e.stopPropagation();
+                const g = state.groups.find(x=>x.id===el.dataset.groupColor);
+                if(g) openColorEditor('group', g.id, g.color);
+            };
+        });
+
+        document.querySelectorAll('[data-tag-color]').forEach(el=>{
+            el.onclick = e=>{
+                e.stopPropagation();
+                const t = state.tags.find(x=>x.id===el.dataset.tagColor);
+                if(t) openColorEditor('tag', t.id, t.color);
+            };
+        });
+
+    }
+
+    function renderSidebar(){
+        groupList.innerHTML = state.groups.map(g=>`
+            <div class="item-row" data-gid="${g.id}">
+                <span class="color-dot editable-color" data-group-color="${g.id}" style="background:${g.color}"></span>
+                <span class="item-name editable-name" data-gid="${g.id}">${escapeHtml(g.name)}</span>
+                <div class="votes-control"><button data-dec-votes="${g.id}">−</button><span class="votes-value" data-gid-votes="${g.id}">${g.defaultVotes||0}</span><button data-inc-votes="${g.id}">+</button></div>
+                <span class="item-actions"><button class="btn-icon" data-del-group="${g.id}">✕</button></span>
+            </div>`).join('');
+        tagList.innerHTML = state.tags.map(t=>`
+            <div class="item-row" data-tid="${t.id}"><span class="color-dot editable-color" data-tag-color="${t.id}" style="background:${t.color}"></span><span class="item-name editable-tag-name" data-tid="${t.id}">${escapeHtml(t.name)}</span><span class="item-actions"><button class="btn-icon" data-del-tag="${t.id}">✕</button></span></div>`).join('');
+        
+        document.querySelectorAll('[data-del-group]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteGroup(b.dataset.delGroup); });
+        document.querySelectorAll('[data-del-tag]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteTag(b.dataset.delTag); });
+        document.querySelectorAll('[data-dec-votes]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); updateGroupVotes(b.dataset.decVotes,-1); });
+        document.querySelectorAll('[data-inc-votes]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); updateGroupVotes(b.dataset.incVotes,1); });
+        
+        document.querySelectorAll('.votes-value[data-gid-votes]').forEach(el=>{
+            el.onclick=function(e){ e.stopPropagation(); const gid=this.dataset.gidVotes; const group=state.groups.find(g=>g.id===gid); if(!group) return; const input=document.createElement('input'); input.type='number'; input.min=0; input.value=group.defaultVotes||0; input.className='vote-input'; input.style.width='40px'; this.replaceWith(input); input.focus(); input.onblur=()=>{ group.defaultVotes=Math.max(0,parseInt(input.value)||0); renderAll(); }; input.onkeydown=e=>{ if(e.key==='Enter') input.blur(); }; };
+        });
+        document.querySelectorAll('.editable-name').forEach(el=>{
+            el.ondblclick=function(e){ e.stopPropagation(); const gid=this.dataset.gid; const group=state.groups.find(g=>g.id===gid); if(!group) return; const input=document.createElement('input'); input.value=group.name; input.style.width='80%'; input.className='vote-input'; this.innerHTML=''; this.appendChild(input); input.focus(); input.onblur=()=>{ const newName=input.value.trim(); if(newName&&newName!==group.name){ if(state.groups.some(g=>g.id!==gid&&g.name===newName)) showToast('⚠️名称重复'); else group.name=newName; } renderAll(); }; input.onkeydown=e=>{ if(e.key==='Enter') input.blur(); }; };
+        });
+        document.querySelectorAll('.editable-tag-name').forEach(el=>{
+            el.ondblclick=function(e){ e.stopPropagation(); const tid=this.dataset.tid; const tag=state.tags.find(t=>t.id===tid); if(!tag) return; const input=document.createElement('input'); input.value=tag.name; input.style.width='80%'; input.className='vote-input'; this.innerHTML=''; this.appendChild(input); input.focus(); input.onblur=()=>{ const newName=input.value.trim(); if(newName&&newName!==tag.name){ if(state.tags.some(t=>t.id!==tid&&t.name===newName)) showToast('⚠️标签重复'); else tag.name=newName; } renderAll(); }; input.onkeydown=e=>{ if(e.key==='Enter') input.blur(); }; };
+        });
+    }
+
+
+    function openColorEditor(type,id,currentColor){
+        const picker = document.createElement('input');
+        picker.type = 'color';
+        picker.value = currentColor;
+        picker.style.position = 'fixed';
+        picker.style.left = '-999px';
+        document.body.appendChild(picker);
+
+        picker.addEventListener('input', ()=>{
+            if(type === 'group'){
+                const g = state.groups.find(g=>g.id===id);
+                if(g) g.color = picker.value;
+            }else{
+                const t = state.tags.find(t=>t.id===id);
+                if(t) t.color = picker.value;
+            }
+            renderAll();
+        });
+
+        picker.click();
+
+        picker.addEventListener('blur', ()=> picker.remove());
+    }
+
+
+    function renderTopics(){
+        const filtered=getFilteredTopics();
+        let html = filtered.length ? '' : '<div style="text-align:center;padding:40px;color:var(--text-secondary);">📭 无匹配议题</div>';
+        filtered.forEach(topic=>{
+            const against=[], neutral=[], support=[];
+            if(topic.assignments) Object.entries(topic.assignments).forEach(([gid,ass])=>{
+                const group=state.groups.find(g=>g.id===gid); if(!group) return;
+                const att=ass.attitude||'neutral'; const entry={group, votes:getGroupVotesForTopic(gid,topic.id)};
+                if(att==='against') against.push(entry); else if(att==='support') support.push(entry); else neutral.push(entry);
+            });
+            const tagBadges=(topic.tagIds||[]).map(tid=>{ const tag=state.tags.find(t=>t.id===tid); return tag?`<span class="topic-tag-badge" style="background:${tag.color}">${escapeHtml(tag.name)}</span>`:''; }).join('');
+            html += `
+                <div class="topic-card" id="topic-card-${topic.id}">
+                    <div class="topic-card-header">
+                        <input class="topic-title-input" value="${escapeHtml(topic.title)}" data-tid="${topic.id}">
+                        <button class="voting-btn" data-vote-topic="${topic.id}">🗳️ 表决</button>
+                        <div class="topic-pies"><div class="mini-pie"><canvas id="pie-all-${topic.id}" width="36" height="36"></canvas></div><div class="mini-pie"><canvas id="pie-bin-${topic.id}" width="36" height="36"></canvas></div></div>
+                        <div class="topic-tags-row">${tagBadges}<button class="add-tag-btn" data-addtag="${topic.id}">＋标签</button></div>
+                        <button class="btn-delete-topic" data-del-topic="${topic.id}">✕</button>
+                    </div>
+                    <div class="topic-desc"><textarea class="topic-desc-textarea" data-tid="${topic.id}">${escapeHtml(topic.description||'')}</textarea></div>
+                    <div class="three-columns">
+                        ${buildColumn('against',against,'🙅 反对','against',topic.id)}
+                        ${buildColumn('neutral',neutral,'😐 中立','neutral',topic.id)}
+                        ${buildColumn('support',support,'👍 支持','support',topic.id)}
+                    </div>
+                </div>`;
+        });
+        viewContainer.innerHTML = html + '<div id="summarySection"></div>';
+        document.querySelectorAll('.topic-title-input').forEach(inp=> inp.onblur=function(){ const t=state.topics.find(t=>t.id===this.dataset.tid); if(t&&this.value.trim()) t.title=this.value.trim(); else if(t) this.value=t.title; renderAll(); });
+        document.querySelectorAll('.topic-desc-textarea').forEach(ta=> ta.onblur=function(){ const t=state.topics.find(t=>t.id===this.dataset.tid); if(t) t.description=this.value; });
+        document.querySelectorAll('[data-del-topic]').forEach(b=>b.onclick=()=>deleteTopic(b.dataset.delTopic));
+        document.querySelectorAll('[data-addtag]').forEach(b=>b.onclick=()=>openTagSelect(b.dataset.addtag));
+        document.querySelectorAll('.tag-remove-btn').forEach(b=>{ b.onclick=function(e){ e.stopPropagation(); const topicId=this.closest('.topic-card').id.replace('topic-card-',''); removeGroup(topicId,this.dataset.rm); }; });
+        document.querySelectorAll('[data-dec-topic-votes]').forEach(el=>{ el.onclick=function(e){ e.stopPropagation(); const [tid,gid]=this.dataset.decTopicVotes.split('|'); updateTopicGroupVotes(tid,gid,getGroupVotesForTopic(gid,tid)-1); }; });
+        document.querySelectorAll('[data-inc-topic-votes]').forEach(el=>{ el.onclick=function(e){ e.stopPropagation(); const [tid,gid]=this.dataset.incTopicVotes.split('|'); updateTopicGroupVotes(tid,gid,getGroupVotesForTopic(gid,tid)+1); }; });
+        document.querySelectorAll('.vote-num').forEach(numEl=>{
+            numEl.onclick=function(e){ e.stopPropagation(); const topicId=this.dataset.tid; const groupId=this.dataset.gid; const current=getGroupVotesForTopic(groupId,topicId); const input=document.createElement('input'); input.type='number'; input.min=0; input.value=current; input.className='vote-input'; this.replaceWith(input); input.focus(); input.onblur=()=>{ updateTopicGroupVotes(topicId,groupId,Math.max(0,parseInt(input.value)||0)); }; input.onkeydown=e=>{ if(e.key==='Enter') input.blur(); }; };
+        });
+        document.querySelectorAll('[data-vote-topic]').forEach(btn=> btn.onclick=()=> startVoting(btn.dataset.voteTopic));
+        filtered.forEach(topic=>{
+            setTimeout(()=>{
+                const ca=$('pie-all-'+topic.id), cb=$('pie-bin-'+topic.id);
+                const d=getTopicPieData(topic.id);
+                if(ca) drawPie(ca,[d.support,d.neutral,d.against],['#22c55e','#94a3b8','#ef4444']);
+                if(cb){ const bin=d.support+d.against; drawPie(cb,bin>0?[d.support,d.against]:[0],bin>0?['#22c55e','#ef4444']:['#e2e8f0']); }
+            },0);
+        });
+    }
+
+    function buildColumn(att,items,label,cls,topicId){
+        const tags=items.map(it=>{
+            const g=it.group; const v=it.votes;
+            return `<span class="group-tag" data-gid="${g.id}" data-tid="${topicId}" data-att="${att}" style="background:${g.color}; color:${getContrast(g.color)};">
+                ${escapeHtml(g.name)}
+                <span class="tag-votes-badge">
+                    <span data-dec-topic-votes="${topicId}|${g.id}">−</span>
+                    <span class="vote-num" data-tid="${topicId}" data-gid="${g.id}">${v}</span>
+                    <span data-inc-topic-votes="${topicId}|${g.id}">+</span>
+                </span>
+                <span class="tag-remove-btn" data-rm="${g.id}">×</span>
+            </span>`;
+        }).join('');
+        return `<div class="attitude-column ${cls}"><div class="column-label">${label}</div><div class="column-tags" data-tid="${topicId}" data-col-att="${att}">${tags||'<span style="color:var(--text-secondary);">—</span>'}</div></div>`;
+    }
+
+    function renderSummary(){
+        const summaryDiv = document.getElementById('summarySection');
+        if(!summaryDiv) return;
+        const data=getSummaryData();
+        summaryDiv.innerHTML = `
+            <div class="summary-pie"><canvas id="summaryPieAll" width="80" height="80"></canvas><span>🟢支持 ${data.support} 🟡中立 ${data.neutral} 🔴反对 ${data.against}</span></div>
+            <div class="summary-pie"><canvas id="summaryPieBin" width="80" height="80"></canvas><span>二元：🟢${data.support} 🔴${data.against}</span></div>
+            <span style="color:var(--text-secondary);">筛选议题数：${getFilteredTopics().length}</span>`;
+        setTimeout(()=>{
+            drawPie($('summaryPieAll'),[data.support,data.neutral,data.against],['#22c55e','#94a3b8','#ef4444']);
+            const bin=data.support+data.against;
+            drawPie($('summaryPieBin'),bin>0?[data.support,data.against]:[0],bin>0?['#22c55e','#ef4444']:['#e2e8f0']);
+        },0);
+    }
+
+    
+function renderVotingView(){
+        if(!state.votingView) return;
+
+        const topic = state.topics.find(t=>t.id===state.votingView.topicId);
+        if(!topic){
+            stopVoting();
+            return;
+        }
+
+        const groups = state.groups;
+
+        if(state.votingView.setup !== true){
+            const summary = groups.map(g=>{
+                const veto = g.veto ? '（一票否决）' : '';
+                // 【修改点1】获取当前议题的专属票权，而不是默认票权
+                const currentVotes = getGroupVotesForTopic(g.id, topic.id);
+                return `<div style="padding:10px 14px;border-radius:12px;background:var(--card-bg);border:1px solid var(--border);display:flex;justify-content:space-between;gap:16px;">
+                    <span>${escapeHtml(g.name)} ${veto}</span>
+                    <span class="editable-topic-votes" data-gid="${g.id}" style="cursor:pointer; text-decoration: underline dotted; color: var(--accent);" title="双击修改此议题专属票权">票权：${currentVotes}</span>
+                </div>`;
+            }).join('');
+
+            viewContainer.innerHTML = `
+                <div class="voting-fullscreen">
+                    <h1 style="font-size:2.2rem;">🗳️ 表决准备</h1>
+                    <h2>${escapeHtml(topic.title)}</h2>
+                    <div style="width:min(760px,100%);display:flex;flex-direction:column;gap:10px;">
+                        ${summary}
+                    </div>
+                    <p style="color:var(--text-secondary);">双击上方带有虚线下划线的票权数字可修改该团体在此议题下的专属票权；单击下面按钮可切换一票否决权。</p>
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+                        ${groups.map(g=>`
+                            <button class="btn-outline veto-btn" data-gid="${g.id}">
+                                ${g.veto ? '取消否决权' : '赋予否决权'}：${escapeHtml(g.name)}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-primary" id="startVotingReal">开始正式表决</button>
+                </div>
+            `;
+
+            // 【修改点2】绑定双击修改议题专属票权的事件
+            document.querySelectorAll('.editable-topic-votes').forEach(el=>{
+                el.ondblclick = function(e){
+                    e.stopPropagation();
+                    const gid = this.dataset.gid;
+                    const current = getGroupVotesForTopic(gid, topic.id);
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.min = 0;
+                    input.value = current;
+                    input.className = 'vote-input';
+                    input.style.width = '50px';
+                    
+                    this.innerHTML = '票权：';
+                    this.appendChild(input);
+                    input.focus();
+                    
+                    input.onblur = () => {
+                        let newVal = parseInt(input.value);
+                        if(isNaN(newVal) || newVal < 0) newVal = current;
+                        updateTopicGroupVotes(topic.id, gid, newVal);
+                    };
+                    input.onkeydown = e => { if(e.key === 'Enter') input.blur(); };
+                };
+            });
+
+            document.querySelectorAll('.veto-btn').forEach(btn=>{
+                btn.onclick = ()=>{
+                    const g = state.groups.find(x=>x.id===btn.dataset.gid);
+                    if(g){
+                        g.veto = !g.veto;
+                        renderVotingView();
+                    }
+                };
+            });
+
+            document.getElementById('startVotingReal').onclick = ()=>{
+                state.votingView.setup = true;
+                renderVotingView();
+            };
+
+            return;
+        }
+
+        const index = state.votingView.currentIndex;
+        const group = groups[index];
+
+        if(!group){
+            // 【修改点3】将默认回退文本改为“表决陷入僵局”
+            const result = state.lastVotingResult || '表决陷入僵局';
+            const bg =
+                result === '表决通过' ? '#16a34a' :
+                result === '表决未通过' ? '#dc2626' :
+                '#64748b';
+
+            viewContainer.innerHTML = `
+                <div class="voting-fullscreen">
+                    <div class="vote-banner" style="background:${bg};">${result}</div>
+                    <button class="btn btn-primary" id="finishVotingBtn">返回总览</button>
+                </div>
+            `;
+
+            document.getElementById('finishVotingBtn').onclick = stopVoting;
+            return;
+        }
+
+        // 【修改点4】在正式表决的卡片中，展示的也应当是专属票权
+        const currentActiveVotes = getGroupVotesForTopic(group.id, topic.id);
+
+        viewContainer.innerHTML = `
+            <div class="voting-fullscreen">
+                <div>
+                    <div style="font-size:1rem;color:var(--text-secondary);">
+                        ${index + 1} / ${groups.length}
+                    </div>
+                    <h1 style="font-size:3rem;">${escapeHtml(group.name)}</h1>
+                    <div style="font-size:1.2rem;">票权：${currentActiveVotes}${group.veto ? ' ｜ 一票否决' : ''}</div>
+                </div>
+
+                <div class="voting-circles">
+                    <button class="vote-circle" data-vote="against" style="background:#dc2626;">🙅<br>反对</button>
+                    <button class="vote-circle" data-vote="neutral" style="background:#64748b;">😐<br>中立</button>
+                    <button class="vote-circle" data-vote="support" style="background:#16a34a;">👍<br>支持</button>
+                </div>
+
+                <button class="btn-outline" id="votingBackBtn">退出表决</button>
+            </div>
+        `;
+
+        document.querySelectorAll('.vote-circle').forEach(btn=>{
+            btn.onclick = ()=>{
+                const attitude = btn.dataset.vote;
+
+                assignGroup(topic.id, group.id, attitude);
+
+                if(group.veto && attitude === 'against'){
+                    state.lastVotingResult = '表决未通过';
+                }
+
+                state.votingView.currentIndex++;
+
+                if(state.votingView.currentIndex >= groups.length){
+                    if(!state.lastVotingResult){
+                        const data = getTopicPieData(topic.id);
+
+                        if(data.support > data.against){
+                            state.lastVotingResult = '表决通过';
+                        }else if(data.against > data.support){
+                            state.lastVotingResult = '表决未通过';
+                        }else{
+                            // 【修改点5】支持与反对票数相等时的结果判定
+                            state.lastVotingResult = '表决陷入僵局';
+                        }
+                    }
+
+                    renderVotingView();
+                    return;
+                }
+
+                renderVotingView();
+            };
+        });
+
+        document.getElementById('votingBackBtn').onclick = ()=>{
+            state.lastVotingResult = null;
+            stopVoting();
+        };
+    }
+
+    // 高级筛选
+    function openAdvancedFilter(){
+        const renderTagOptions=(containerId,selectedSet)=>{
+            const container=$(containerId);
+            container.innerHTML=state.tags.map(tag=>`<button class="filter-tag-btn ${selectedSet.has(tag.id)?'active':''}" data-tid="${tag.id}"><span class="color-dot" style="background:${tag.color};width:12px;height:12px;"></span>${escapeHtml(tag.name)}</button>`).join('');
+            container.querySelectorAll('.filter-tag').forEach(el=>el.onclick=()=>{ const tid=el.dataset.tid; if(selectedSet.has(tid)) selectedSet.delete(tid); else selectedSet.add(tid); renderTagOptions(containerId,selectedSet); });
+        };
+        renderTagOptions('mustIncludeTags',advancedFilter.mustInclude);
+        renderTagOptions('mayIncludeTags',advancedFilter.mayInclude);
+        renderTagOptions('excludeTags',advancedFilter.exclude);
+        advancedFilterModal.style.display='flex';
+    }
+    $('advancedFilterApply').onclick=()=>{ advancedFilterModal.style.display='none'; renderAll(); };
+    $('advancedFilterCancel').onclick=()=>advancedFilterModal.style.display='none';
+    btnAdvancedFilter.onclick=openAdvancedFilter;
+    btnClearAdvancedFilter.onclick=()=>{ advancedFilter.mustInclude.clear(); advancedFilter.mayInclude.clear(); advancedFilter.exclude.clear(); renderAll(); };
+
+    // 风格
+    btnStylePicker.onclick=()=>{ styleModal.style.display='flex'; };
+    styleModalCancel.onclick=()=>styleModal.style.display='none';
+    document.querySelectorAll('#styleModal .style-option').forEach(opt=>{
+        opt.onclick=function(){
+            const style=this.dataset.style;
+            document.body.classList.remove('dark','leftist');
+            if(style==='dark') document.body.classList.add('dark');
+            else if(style==='leftist') document.body.classList.add('leftist');
+            currentStyle=style;
+            styleModal.style.display='none';
+        };
+    });
+
+    // 标签选择
+    const tagSelectModal=$('tagSelectModal'), tagSelectList=$('tagSelectList');
+    const modalTagDone=$('modalTagDone'), modalTagCancel=$('modalTagCancel');
+    let tagSelectTopicId=null, selectedTagIds=[];
+    function openTagSelect(topicId){ tagSelectTopicId=topicId; const topic=state.topics.find(t=>t.id===topicId); selectedTagIds=topic?[...(topic.tagIds||[])]:[]; renderTagSelectList(); tagSelectModal.style.display='flex'; }
+    function renderTagSelectList(){
+        tagSelectList.innerHTML=state.tags.map(tag=>`<button class="filter-tag-btn ${selectedTagIds.includes(tag.id)?'active':''}" data-tid="${tag.id}"><span class="color-dot" style="background:${tag.color};width:12px;height:12px;"></span>${escapeHtml(tag.name)}</button>`).join('');
+        tagSelectList.querySelectorAll('.filter-tag').forEach(el=>el.onclick=()=>{ const tid=el.dataset.tid; const idx=selectedTagIds.indexOf(tid); if(idx>-1) selectedTagIds.splice(idx,1); else selectedTagIds.push(tid); renderTagSelectList(); });
+    }
+    modalTagDone.onclick=()=>{ const topic=state.topics.find(t=>t.id===tagSelectTopicId); if(topic) topic.tagIds=selectedTagIds; tagSelectModal.style.display='none'; renderAll(); };
+    modalTagCancel.onclick=()=>tagSelectModal.style.display='none';
+
+    // ==================== 议会席位（完全重构版） ====================
+    function openParliament(){
+        if(state.groups.length===0){ showToast('请先添加团体'); return; }
+        parliamentModal.style.display='flex';
+        selectedGroupId = null;
+        if(state.parliamentConfig && state.parliamentConfig.groupSeats) {
+            parliamentTotalSeats.value = state.parliamentConfig.totalSeats || 100;
+            updateParliamentInputsFromConfig();
+        } else {
+            parliamentTotalSeats.value = 100;
+            updateParliamentInputs();
+        }
+        drawParliament();
+    }
+
+    function updateParliamentInputs(){
+        const totalSeats = parseInt(parliamentTotalSeats.value) || 100;
+        const groups = state.groups;
+        const getVotes = g => g.defaultVotes !== undefined ? g.defaultVotes : 1;
+        const totalVotes = groups.reduce((sum,g)=>sum+getVotes(g), 0);      
+        let html = '';
+        groups.forEach(g => {
+            const proportion = totalVotes > 0 ? getVotes(g) / totalVotes : 0;
+            const seats = Math.floor(proportion * totalSeats);
+            html += `<div class="parliament-group-row" data-gid="${g.id}"><span class="color-dot editable-color" data-group-color="${g.id}" style="background:${g.color}"></span>${escapeHtml(g.name)} <input type="number" class="group-seat-input" data-gid="${g.id}" min="0" value="${seats}"></div>`;
+        });
+        parliamentGroupInputs.innerHTML = html;
+        bindParliamentInputEvents();
+        autoAdjustSeats();
+    }
+
+    function updateParliamentInputs(){
+        const totalSeats = parseInt(parliamentTotalSeats.value) || 100;
+        const groups = state.groups;
+        const totalVotes = groups.reduce((sum,g)=>sum+(g.defaultVotes||1),0);
+        let html = '';
+        groups.forEach(g => {
+            const proportion = (g.defaultVotes||1) / totalVotes;
+            const seats = Math.floor(proportion * totalSeats);
+            html += `<div class="parliament-group-row" data-gid="${g.id}"><span class="color-dot editable-color" data-group-color="${g.id}" style="background:${g.color}"></span>${escapeHtml(g.name)} <input type="number" class="group-seat-input" data-gid="${g.id}" min="0" value="${seats}"></div>`;
+        });
+        parliamentGroupInputs.innerHTML = html;
+        bindParliamentInputEvents();
+        autoAdjustSeats();
+    }
+
+    function bindParliamentInputEvents(){
+        document.querySelectorAll('.group-seat-input').forEach(inp=>{
+            inp.addEventListener('input', (e) => {
+                e.stopPropagation();
+                clipExcessSeats();
+                drawParliament();
+            });
+            inp.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        });
+        parliamentTotalSeats.addEventListener('input', () => {
+            clipExcessSeats();
+            drawParliament();
+        });
+        document.querySelectorAll('.parliament-group-row').forEach(row => {
+            row.style.cursor = 'pointer'; 
+            row.onclick = () => {
+                const gid = row.dataset.gid;
+                if(selectedGroupId === gid) {
+                    selectedGroupId = null; 
+                    row.classList.remove('selected');
+                } else {
+                    selectedGroupId = gid;
+                    document.querySelectorAll('.parliament-group-row').forEach(r => r.classList.remove('selected'));
+                    row.classList.add('selected');
+                }
+                drawParliament();
+            };
+        });
+    }
+
+    function clipExcessSeats(){
+        const total = parseInt(parliamentTotalSeats.value) || 100;
+        const inputs = document.querySelectorAll('.group-seat-input');
+        if(!inputs.length) return;
+        let sum = 0;
+        const values = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
+        values.forEach(v => sum += v);
+        if(sum > total){
+            let excess = sum - total;
+            for(let i = values.length-1; i >=0 && excess >0; i--){
+                const reduce = Math.min(values[i], excess);
+                values[i] -= reduce;
+                excess -= reduce;
+            }
+            inputs.forEach((inp, idx) => { inp.value = values[idx]; });
+        }
+    }
+
+    function autoAdjustSeats(){
+        const totalSeats = parseInt(parliamentTotalSeats.value) || 100;
+        const groups = state.groups;
+        const getVotes = g => g.defaultVotes !== undefined ? g.defaultVotes : 1;
+        const totalVotes = groups.reduce((sum,g)=>sum+getVotes(g), 0);
+        
+        const seats = groups.map(g => totalVotes > 0 ? Math.floor(getVotes(g)/totalVotes * totalSeats) : 0);
+        let remaining = totalSeats - seats.reduce((a,b)=>a+b,0);
+        
+        const remainders = groups.map((g,i)=> ({
+            i, 
+            rem: totalVotes > 0 ? (getVotes(g)/totalVotes * totalSeats - seats[i]) : 0
+        }));
+        
+        remainders.sort((a,b)=> b.rem - a.rem);
+        for(let i=0; i<remaining; i++){
+            if (totalVotes > 0 && seats[remainders[i].i] !== undefined) {
+                seats[remainders[i].i]++;
+            }
+        }
+        
+        const inputs = document.querySelectorAll('.group-seat-input');
+        inputs.forEach((inp, idx)=> { if(seats[idx] !== undefined) inp.value = seats[idx]; });
+    }
+
+    function autoAllocate(){
+        parliamentTotalSeats.dispatchEvent(new Event('input'));
+        updateParliamentInputs();
+        drawParliament();
+    }
+
+    function saveParliamentConfig(){
+        const totalSeats = parseInt(parliamentTotalSeats.value) || 100;
+        const inputs = document.querySelectorAll('.group-seat-input');
+        const groupSeats = {};
+        inputs.forEach(inp => { groupSeats[inp.dataset.gid] = parseInt(inp.value) || 0; });
+        state.parliamentConfig = { totalSeats, groupSeats };
+        showToast('💾 议会配置已保存');
+        drawParliament();
+    }
+
+    function drawParliament(){
+        const canvas = parliamentCanvas;
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width, height = canvas.height;
+        ctx.clearRect(0,0,width,height);
+
+        const inputs = document.querySelectorAll('.group-seat-input');
+        if(!inputs.length) return;
+
+        const groups = state.groups;
+        const totalSeats = Math.max(1, parseInt(parliamentTotalSeats.value) || 100);
+
+        let seatCounts = [];
+        inputs.forEach(inp => {
+            const gid = inp.dataset.gid;
+            const group = groups.find(g=>g.id===gid);
+            if(group){
+                seatCounts.push({
+                    color: group.color,
+                    seats: Math.max(0, parseInt(inp.value) || 0),
+                    groupId: gid,
+                    name: group.name
+                });
+            }
+        });
+
+        let assignedSeats = 0;
+        seatCounts.forEach(g => assignedSeats += g.seats);
+
+        // ===== 半圆参数 =====
+        const centerX = width / 2;
+        const centerY = height - 18;
+
+        const outerRadius = Math.min(width * 0.48, height * 0.92);
+        const innerRadius = Math.max(58, Math.min(outerRadius * 0.34, 95));
+
+        // 根据总席位动态调整行数，保证始终为半圆
+        const rows = Math.max(3, Math.ceil(Math.sqrt(totalSeats) / 2.2));
+        const rowGap = (outerRadius - innerRadius) / rows * 1.08;
+
+        // 【核心修复：根据半圆弧长精确分配每行的席位，确保总坐标数绝对等于 totalSeats】
+        let radii = [];
+        let sumRadii = 0;
+        for(let row = 0; row < rows; row++){
+            const radius = outerRadius - rowGap * (row + 0.5);
+            radii.push(radius);
+            sumRadii += radius;
+        }
+
+        let seatsPerRow = [];
+        let unassigned = totalSeats;
+        let remainders = [];
+
+        for(let row = 0; row < rows; row++){
+            // 按半径（即弧长）比例分配席位
+            const exact = totalSeats * (radii[row] / sumRadii);
+            const count = Math.floor(exact);
+            seatsPerRow.push(count);
+            unassigned -= count;
+            remainders.push({ row, rem: exact - count });
+        }
+
+        // 将因取整掉落的余数，按照从大到小补齐给各行
+        remainders.sort((a,b) => b.rem - a.rem);
+        for(let i = 0; i < unassigned; i++){
+            seatsPerRow[remainders[i].row]++;
+        }
+
+        let seatPositions = [];
+        for(let row = 0; row < rows; row++){
+            const radius = radii[row];
+            const seatsInRow = seatsPerRow[row];
+
+            for(let i = 0; i < seatsInRow; i++){
+                // 确保只有一个席位时能居中显示
+                const angle = seatsInRow <= 1 ? Math.PI / 2 : Math.PI - (Math.PI * (i + 0.5) / seatsInRow);
+                seatPositions.push({
+                    x: centerX + radius * Math.cos(angle),
+                    y: centerY - radius * Math.sin(angle),
+                    angle,
+                    radius
+                });
+            }
+        }
+
+        // 按角度排序，保证同一团体聚集在连续扇区
+        seatPositions.sort((a, b) => a.angle - b.angle);
+        // ===== 自动适配圆点大小，避免重叠 =====
+        let minDistance = Infinity;
+
+        for(let i = 0; i < seatPositions.length; i++){
+            for(let j = i + 1; j < seatPositions.length; j++){
+                const dx = seatPositions[i].x - seatPositions[j].x;
+                const dy = seatPositions[i].y - seatPositions[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if(dist < minDistance){
+                    minDistance = dist;
+                }
+            }
+        }
+
+        // 保证圆点之间始终留有间隔
+        const dotRadius = Math.max(
+            2,
+            Math.min(
+                9,
+                (minDistance * 0.42)
+            )
+        );
+
+        // 构建席位数组：团体连续分布
+        let seatArray = [];
+        seatCounts.forEach(group => {
+            for(let i = 0; i < group.seats; i++){
+                seatArray.push({
+                    color: group.color,
+                    groupId: group.groupId,
+                    name: group.name
+                });
+            }
+        });
+
+        while(seatArray.length < totalSeats){
+            seatArray.push({
+                color: '#d1d5db',
+                groupId: null,
+                name: ''
+            });
+        }
+
+        parliamentSeatData = [];
+
+        // 绘制席位
+        seatPositions.forEach((pos, index) => {
+            const seat = seatArray[index];
+            if(!seat) return;
+
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, dotRadius, 0, Math.PI * 2);
+
+            ctx.fillStyle = seat.color;
+
+            if(seat.groupId && selectedGroupId === seat.groupId){
+                ctx.shadowColor = '#ffffff';
+                ctx.shadowBlur = 10;
+            }
+
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            parliamentSeatData.push({
+                x: pos.x,
+                y: pos.y,
+                r: dotRadius,
+                groupId: seat.groupId,
+                color: seat.color
+            });
+        });
+
+        // ===== 中央空白区 =====
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, innerRadius - 8, Math.PI, 0);
+        ctx.lineTo(centerX + innerRadius - 8, centerY);
+        ctx.lineTo(centerX - innerRadius + 8, centerY);
+        ctx.closePath();
+
+        ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--card-bg');
+        ctx.fill();
+
+        // ===== 文本 =====
+        ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        let ratioText = "";
+        let labelText = "";
+
+        // 精准判定：如果点选了团体，显示 团体席位/总席位 和 团体名称/总席位
+        if(selectedGroupId){
+            const selectedGroup = seatCounts.find(g => g.groupId === selectedGroupId);
+            if(selectedGroup){
+                ratioText = `${selectedGroup.seats}/${totalSeats}`;
+                labelText = `${selectedGroup.name}/总席位`;
+            } else {
+                ratioText = `${assignedSeats}/${totalSeats}`;
+                labelText = `总席位/总席位`;
+            }
+        } else {
+            // 未点选任何团体时，保持默认总览显示
+            ratioText = `${assignedSeats}/${totalSeats}`;
+            labelText = `总席位/总席位`;
+        }
+
+        // 自适应字号
+        let ratioFont = Math.min(28, innerRadius * 0.34);
+        let labelFont = Math.min(18, innerRadius * 0.20);
+
+        ctx.font = `bold ${ratioFont}px sans-serif`;
+        while(ctx.measureText(ratioText).width > innerRadius * 1.45 && ratioFont > 10){
+            ratioFont -= 1;
+            ctx.font = `bold ${ratioFont}px sans-serif`;
+        }
+
+        ctx.font = `bold ${labelFont}px sans-serif`;
+        while(ctx.measureText(labelText).width > innerRadius * 1.55 && labelFont > 8){
+            labelFont -= 1;
+            ctx.font = `bold ${labelFont}px sans-serif`;
+        }
+
+        ctx.font = `bold ${ratioFont}px sans-serif`;
+        ctx.fillText(ratioText, centerX, centerY - innerRadius * 0.22);
+
+        ctx.font = `bold ${labelFont}px sans-serif`;
+        ctx.fillText(labelText, centerX, centerY + innerRadius * 0.10);
+    }
+
+    // 点击Canvas选中团体（优化模糊判定版）
+    parliamentCanvas.addEventListener('click', (e) => {
+        const rect = parliamentCanvas.getBoundingClientRect();
+        const scaleX = parliamentCanvas.width / rect.width;
+        const scaleY = parliamentCanvas.height / rect.height;
+        const mouseX = (e.clientX - rect.left) * scaleX;
+        const mouseY = (e.clientY - rect.top) * scaleY;
+        
+        let closestSeat = null;
+        let minClickDist = 16; // 允许16像素以内的点击误差，大幅提升点击选中率
+        
+        for(let seat of parliamentSeatData){
+            const dx = mouseX - seat.x, dy = mouseY - seat.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist < minClickDist && seat.groupId){
+                minClickDist = dist;
+                closestSeat = seat;
+            }
+        }
+        
+        if(closestSeat){
+            const foundGroupId = closestSeat.groupId;
+            if(selectedGroupId === foundGroupId) selectedGroupId = null;
+            else selectedGroupId = foundGroupId;
+            document.querySelectorAll('.parliament-group-row').forEach(row => row.classList.remove('selected'));
+            if(selectedGroupId){
+                const row = document.querySelector(`.parliament-group-row[data-gid="${selectedGroupId}"]`);
+                if(row) row.classList.add('selected');
+            }
+            drawParliament();
+        }
+    });
+
+    btnParliament.onclick = openParliament;
+    btnAutoAllocate.onclick = autoAllocate;
+    btnSaveConfig.onclick = saveParliamentConfig;
+    parliamentClose.onclick = ()=> parliamentModal.style.display='none';
+    parliamentTotalSeats.addEventListener('input', ()=>{ clipExcessSeats(); drawParliament(); });
+
+    // 导出导入（包含议会配置）
+    function exportJSON(){
+        const inputs = document.querySelectorAll('.group-seat-input');
+        if(inputs.length > 0){
+            const totalSeats = parseInt(parliamentTotalSeats.value) || 100;
+            const groupSeats = {};
+            inputs.forEach(inp => { groupSeats[inp.dataset.gid] = parseInt(inp.value) || 0; });
+            state.parliamentConfig = { totalSeats, groupSeats };
+        }    
+        const data={groups:state.groups,tags:state.tags,topics:state.topics, parliamentConfig: state.parliamentConfig};
+        const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='议题数据.json'; a.click();
+    }
+    function importJSON(file){
+        const reader=new FileReader();
+        reader.onload=e=>{
+            try{
+                const data=JSON.parse(e.target.result);
+                if(data.groups&&data.tags&&data.topics){
+                    state.groups=data.groups; state.tags=data.tags; state.topics=data.topics;
+                    state.parliamentConfig = data.parliamentConfig || null;
+                    state.nextGroupId=Math.max(...state.groups.map(g=>parseInt(g.id.split('_')[1])||0),0)+1;
+                    state.nextTopicId=Math.max(...state.topics.map(t=>parseInt(t.id.split('_')[1])||0),0)+1;
+                    state.nextTagId=Math.max(...state.tags.map(t=>parseInt(t.id.split('_')[1])||0),0)+1;
+                    renderAll(); showToast('✅数据导入成功');
+                }else showToast('⚠️文件格式错误');
+            }catch(ex){showToast('⚠️解析失败');}
+        };
+        reader.readAsText(file);
+    }
+    async function exportPNG(){
+        try{
+            const canvas=await html2canvas(exportArea,{scale:2,backgroundColor:getComputedStyle(document.body).getPropertyValue('--bg'),logging:false});
+            const link=document.createElement('a'); link.download='议题分析长图.png'; link.href=canvas.toDataURL('image/png'); link.click();
+        }catch(e){showToast('⚠️截图失败');}
+    }
+
+    btnAddGroup.onclick=addGroup; groupNameInput.onkeydown=e=>{if(e.key==='Enter')addGroup();};
+    groupColorPicker.oninput=()=>groupColorBtn.style.background=groupColorPicker.value;
+    btnAddTag.onclick=addTag; tagNameInput.onkeydown=e=>{if(e.key==='Enter')addTag();};
+    tagColorPicker.oninput=()=>tagColorBtn.style.background=tagColorPicker.value;
+    btnAddTopic.onclick=()=>{topicModal.style.display='flex'; modalTitleInput.focus();};
+    modalTopicCancel.onclick=()=>topicModal.style.display='none';
+    modalTopicConfirm.onclick=addTopic;
+    btnExportJSON.onclick=exportJSON;
+    btnImportJSON.onclick=()=>importFileInput.click();
+    importFileInput.onchange=e=>{if(e.target.files[0])importJSON(e.target.files[0]); importFileInput.value='';};
+    btnExportPNG.onclick=exportPNG;
+    document.addEventListener('selectstart',e=>{if(dragInfo?.dragging) e.preventDefault();});
+
+    if(state.groups.length===0){
+        state.groups=[{id:'g1',name:'环保组织',color:'#10b981',defaultVotes:1},{id:'g2',name:'企业联盟',color:'#f59e0b',defaultVotes:2}];
+        state.tags=[{id:'tag1',name:'环境',color:'#10b981'},{id:'tag2',name:'经济',color:'#f59e0b'}];
+        state.topics=[{id:'tp1',title:'限塑令升级',description:'是否全面禁止一次性塑料？',tagIds:['tag1'],assignments:{g1:{attitude:'support'},g2:{attitude:'against',votes:3}}}];
+        state.nextGroupId=3; state.nextTopicId=2; state.nextTagId=3;
+    }
+    document.body.classList.remove('dark','leftist');
+    renderAll();
+})();
+</script>
+</body>
+</html>
