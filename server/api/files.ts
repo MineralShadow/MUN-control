@@ -1,5 +1,5 @@
-import type { SessionUser, SubmittedFile } from '../src/types.ts'
-import { createId } from '../src/lib/id.ts'
+import type { SessionUser, SubmittedFile } from '../../src/types.ts'
+import { createId } from '../../src/lib/id.ts'
 import { getDb } from './db.ts'
 
 interface FileRow {

@@ -1,4 +1,4 @@
-import type { TimeState } from '../src/types.ts'
+import type { TimeState } from '../../src/types.ts'
 import { getDb } from './db.ts'
 
 export interface TimeRow {

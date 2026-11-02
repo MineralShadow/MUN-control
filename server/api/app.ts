@@ -1,8 +1,8 @@
 import { Hono, type Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import type { Action } from '../src/state/reducer.ts'
-import { createId } from '../src/lib/id.ts'
-import type { AccountInfo } from '../src/types.ts'
+import type { Action } from '../../src/state/reducer.ts'
+import { createId } from '../../src/lib/id.ts'
+import type { AccountInfo } from '../../src/types.ts'
 import { hashPassword } from './password.ts'
 import {
   getSessionUser,

@@ -2,8 +2,8 @@ import type {
   CouncilEvent,
   EventRecipientView,
   SessionUser,
-} from '../src/types.ts'
-import { createId } from '../src/lib/id.ts'
+} from '../../src/types.ts'
+import { createId } from '../../src/lib/id.ts'
 import { getDb } from './db.ts'
 import {
   clearCrisisPause,

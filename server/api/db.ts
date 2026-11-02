@@ -1,7 +1,7 @@
 import type { Client } from '@libsql/client'
 import { createClient } from '@tursodatabase/serverless/compat'
-import { createInitialState } from '../src/state/defaults.ts'
-import { createId } from '../src/lib/id.ts'
+import { createInitialState } from '../../src/state/defaults.ts'
+import { createId } from '../../src/lib/id.ts'
 import { hashPassword } from './password.ts'
 
 const SCHEMA = [

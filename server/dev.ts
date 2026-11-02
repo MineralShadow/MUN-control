@@ -2,8 +2,8 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { serve } from '@hono/node-server'
 import { createClient } from '@libsql/client/node'
-import { setLocalClient } from '../api/db.ts'
-import { app } from '../api/app.ts'
+import { setLocalClient } from './api/db.ts'
+import { app } from './api/app.ts'
 
 if (!process.env.TURSO_DATABASE_URL) {
   const file = './.data/mun.db'

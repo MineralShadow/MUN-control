@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
-import type { SessionUser } from '../src/types.ts'
+import type { SessionUser } from '../../src/types.ts'
 import { getDb } from './db.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 

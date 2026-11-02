@@ -1,7 +1,7 @@
-import type { ConferenceState } from '../src/types.ts'
-import { createInitialState } from '../src/state/defaults.ts'
-import { reducer, type Action } from '../src/state/reducer.ts'
-import { normalizeState } from '../src/state/storage.ts'
+import type { ConferenceState } from '../../src/types.ts'
+import { createInitialState } from '../../src/state/defaults.ts'
+import { reducer, type Action } from '../../src/state/reducer.ts'
+import { normalizeState } from '../../src/state/storage.ts'
 import { getDb } from './db.ts'
 
 export interface MeetingSnapshot {
