@@ -6,7 +6,7 @@ import { app } from './app.ts'
  * 处理，导致请求挂起或 FUNCTION_INVOCATION_FAILED。
  */
 export default {
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request) {
     return app.fetch(request)
   },
 }
