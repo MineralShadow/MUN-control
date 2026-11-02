@@ -40,9 +40,53 @@ import {
 
 const app = new Hono()
 
+function isHealthRequest(c: Context): boolean {
+  return (
+    c.req.path === '/api/health' ||
+    (c.req.path === '/api' && c.req.query('route') === '/health')
+  )
+}
+
 app.use('*', async (c, next) => {
+  // 健康检查要能看到真实的数据库错误，所以不能先被 ensureDb 拦掉
+  if (isHealthRequest(c)) return next()
   await ensureDb()
   await next()
+})
+
+/**
+ * 部署诊断：不登录也能访问
+ * 线上访问 /api?route=/health
+ */
+app.get('/api/health', async (c) => {
+  const env = {
+    hasDatabaseUrl: Boolean(process.env.TURSO_DATABASE_URL),
+    hasAuthToken: Boolean(process.env.TURSO_AUTH_TOKEN),
+    vercel: Boolean(process.env.VERCEL),
+    node: process.version,
+  }
+
+  try {
+    await ensureDb()
+    const result = await getDb().execute('SELECT 1 AS ok')
+    return c.json({
+      ok: true,
+      env,
+      database: 'ok',
+      probe: Number(result.rows[0]?.ok ?? 0),
+    })
+  } catch (error) {
+    console.error('[health]', error)
+    return c.json(
+      {
+        ok: false,
+        env,
+        database: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      },
+      500,
+    )
+  }
 })
 
 /**

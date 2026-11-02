@@ -206,7 +206,11 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
               重试
             </button>
             <p className="boot-hint">
-              部署到 Vercel 时，请确认已配置 TURSO_DATABASE_URL 与 TURSO_AUTH_TOKEN。
+              部署到 Vercel 时，请确认已配置 TURSO_DATABASE_URL 与 TURSO_AUTH_TOKEN，
+              并且修改环境变量后重新部署。
+            </p>
+            <p className="boot-hint">
+              服务端诊断地址：/api?route=/health（返回环境变量是否存在、数据库是否连通）。
             </p>
           </div>
         </div>
