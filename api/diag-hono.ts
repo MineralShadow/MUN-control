@@ -1,7 +1,10 @@
-import { app } from './app.ts'
+import { Hono } from 'hono'
 
-export default function handler(request: Request) {
-  return app.fetch(request)
+const app = new Hono()
+app.get('/api/diag-hono', (c) => c.json({ ok: true, lib: 'hono' }))
+
+export default {
+  fetch(request: Request) {
+    return app.fetch(request)
+  },
 }
-
-export const fetch = handler
