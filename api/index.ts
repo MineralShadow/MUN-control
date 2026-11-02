@@ -1,12 +1,16 @@
 import { app } from './app.ts'
 
 /**
- * Vercel 的 Web Handler 入口必须导出一个带 fetch 方法的对象。
- * 不能导出函数，也不能用 Object.assign；实测函数形式会被当成 Node (req,res)
- * 处理，导致请求挂起或 FUNCTION_INVOCATION_FAILED。
+ * Vercel Node.js Function：新运行时用命名 HTTP 方法导出，并传入 Web Request。
+ * 不要用 default function / default { fetch }，否则会被当成 Edge 或 Node (req,res)，
+ * 导致 Node 内置模块（crypto、Buffer 等）不可用或请求挂起。
  */
-export default {
-  fetch(request: Request) {
-    return app.fetch(request)
-  },
-}
+const handler = (request: Request) => app.fetch(request)
+
+export const GET = handler
+export const HEAD = handler
+export const POST = handler
+export const PUT = handler
+export const PATCH = handler
+export const DELETE = handler
+export const OPTIONS = handler
