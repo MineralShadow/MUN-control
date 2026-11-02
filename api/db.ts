@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { createClient, type Client } from '@libsql/client'
+import type { Client } from '@libsql/client'
 import { createInitialState } from '../src/state/defaults.ts'
 import { createId } from '../src/lib/id.ts'
 import { hashPassword } from './password.ts'
@@ -64,28 +64,76 @@ const SCHEMA = [
   )`,
 ]
 
-let client: Client | null = null
+let clientPromise: Promise<Client> | null = null
+let resolvedClient: Client | null = null
 let initPromise: Promise<void> | null = null
 
-export function getDb(): Client {
-  if (client) return client
-
+function resolveDatabaseUrl(): string {
   const configured = process.env.TURSO_DATABASE_URL
   if (!configured && process.env.VERCEL) {
     throw new Error('未配置 TURSO_DATABASE_URL，请在 Vercel 环境变量中设置数据库地址')
   }
+  return configured ?? 'file:./.data/mun.db'
+}
 
-  const url = configured ?? 'file:./.data/mun.db'
+/**
+ * 本地开发用 file:（Node + 原生 SQLite），线上用Turso HTTP 客户端。
+ * 注意：不能用 `@libsql/client` 默认入口静态导入——它在 Vercel 上可能加载
+ * 原生 libsql 二进制并导致 FUNCTION_INVOCATION_FAILED。
+ */
+async function createDbClient(): Promise<Client> {
+  const url = resolveDatabaseUrl()
+
   if (url.startsWith('file:')) {
     const filePath = url.slice('file:'.length)
     mkdirSync(dirname(filePath), { recursive: true })
+    const { createClient } = await import('@libsql/client/node')
+    return createClient({ url })
   }
 
-  client = createClient({
+  const { createClient } = await import('@libsql/client/http')
+  return createClient({
     url,
     authToken: process.env.TURSO_AUTH_TOKEN,
   })
-  return client
+}
+
+function getClient(): Promise<Client> {
+  if (resolvedClient) return Promise.resolve(resolvedClient)
+  if (!clientPromise) {
+    clientPromise = createDbClient()
+      .then((client) => {
+        resolvedClient = client
+        return client
+      })
+      .catch((error) => {
+        clientPromise = null
+        throw error
+      })
+  }
+  return clientPromise
+}
+
+/**
+ * 同步返回一个惰性代理：真正的方法调用（execute/batch）才触发连接初始化。
+ * 这样现有业务代码可以继续写 `const db = getDb(); await db.execute(...)`。
+ */
+const clientProxy = new Proxy({} as Client, {
+  get(_target, property) {
+    if (property === 'then') return undefined
+    return (...args: unknown[]) =>
+      getClient().then((client) => {
+        const value = (client as unknown as Record<string | symbol, unknown>)[property]
+        if (typeof value === 'function') {
+          return value.apply(client, args)
+        }
+        return value
+      })
+  },
+})
+
+export function getDb(): Client {
+  return clientProxy
 }
 
 async function seed(): Promise<void> {
