@@ -101,7 +101,7 @@ pnpm dev
 3. 在 Vercel 配置两个环境变量。
 4. Deploy；首次访问用初始主席账号登录，修改密码并创建代表账号。
 
-`api/index.ts` 会自动成为 Serverless Function，无需额外服务器配置。
+`api/index.js` 是构建时由 `server/vercel-handler.ts` 预打包的单文件入口，会作为 `/api` Serverless Function 部署；这样可以避免 Vercel 直接解析 `.ts` 依赖。
 
 ## 七、数据与安全
 
@@ -131,8 +131,11 @@ pnpm dev
 ## 十、目录
 
 ```text
-├─ api/                    Hono API（index.ts 为 Vercel 入口）
-├─ server/dev.ts           本地 API
+├─ api/index.js            Vercel 入口（构建时由 esbuild 生成，需提交）
+├─ server/
+│  ├─ dev.ts               本地 API
+│  ├─ vercel-handler.ts    Vercel 入口源码
+│  └─ api/                 Hono 路由/数据库/事件/文件
 ├─ src/                    React 前端（pages/components/features/state/lib/styles）
 ├─ public/xiaohongshu-qr.png
 ├─ 部署指南.md
