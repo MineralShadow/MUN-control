@@ -1,6 +1,5 @@
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
 import type { Client } from '@libsql/client'
+import { createClient } from '@libsql/client/http'
 import { createInitialState } from '../src/state/defaults.ts'
 import { createId } from '../src/lib/id.ts'
 import { hashPassword } from './password.ts'
@@ -64,34 +63,25 @@ const SCHEMA = [
   )`,
 ]
 
-let clientPromise: Promise<Client> | null = null
+let localClient: Client | null = null
+let remotePromise: Promise<Client> | null = null
 let resolvedClient: Client | null = null
 let initPromise: Promise<void> | null = null
 
-function resolveDatabaseUrl(): string {
-  const configured = process.env.TURSO_DATABASE_URL
-  if (!configured && process.env.VERCEL) {
-    throw new Error('未配置 TURSO_DATABASE_URL，请在 Vercel 环境变量中设置数据库地址')
-  }
-  return configured ?? 'file:./.data/mun.db'
+/**
+ * 本地开发由 server/dev.ts 注入 file: 客户端。
+ * API 函数本身只静态依赖 @libsql/client/http，避免 Vercel 加载原生 libsql。
+ */
+export function setLocalClient(client: Client): void {
+  localClient = client
+  resolvedClient = client
 }
 
-/**
- * 本地开发用 file:（Node + 原生 SQLite），线上用Turso HTTP 客户端。
- * 注意：不能用 `@libsql/client` 默认入口静态导入——它在 Vercel 上可能加载
- * 原生 libsql 二进制并导致 FUNCTION_INVOCATION_FAILED。
- */
-async function createDbClient(): Promise<Client> {
-  const url = resolveDatabaseUrl()
-
-  if (url.startsWith('file:')) {
-    const filePath = url.slice('file:'.length)
-    mkdirSync(dirname(filePath), { recursive: true })
-    const { createClient } = await import('@libsql/client/node')
-    return createClient({ url })
+function createRemoteClient(): Client {
+  const url = process.env.TURSO_DATABASE_URL
+  if (!url) {
+    throw new Error('未配置 TURSO_DATABASE_URL，请在 Vercel 环境变量中设置数据库地址')
   }
-
-  const { createClient } = await import('@libsql/client/http')
   return createClient({
     url,
     authToken: process.env.TURSO_AUTH_TOKEN,
@@ -99,19 +89,21 @@ async function createDbClient(): Promise<Client> {
 }
 
 function getClient(): Promise<Client> {
+  if (localClient) return Promise.resolve(localClient)
   if (resolvedClient) return Promise.resolve(resolvedClient)
-  if (!clientPromise) {
-    clientPromise = createDbClient()
+  if (!remotePromise) {
+    remotePromise = Promise.resolve()
+      .then(() => createRemoteClient())
       .then((client) => {
         resolvedClient = client
         return client
       })
       .catch((error) => {
-        clientPromise = null
+        remotePromise = null
         throw error
       })
   }
-  return clientPromise
+  return remotePromise
 }
 
 /**
