@@ -4573,7 +4573,7 @@ async function validateEventInput(body, currentTime) {
   const content = text(body.content, 8e3);
   if (!title) throw new HTTPException(400, { message: "\u4E8B\u4EF6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
   const eventTimeRaw = Number(body.eventTime);
-  const eventTime = Number.isFinite(eventTimeRaw) && eventTimeRaw > 0 ? Math.round(eventTimeRaw) : currentTime;
+  const eventTime = Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 864e13 ? Math.round(eventTimeRaw) : currentTime;
   const isCrisis = body.isCrisis === true;
   const recipientIds = await validateRecipients(body.recipientIds);
   return { title, content, eventTime, isCrisis, recipientIds };
@@ -4629,7 +4629,7 @@ app.post("/api/time", async (c) => {
   const action = String(body.action ?? "");
   const value = Number(body.value);
   if (action === "set") {
-    if (!Number.isFinite(value) || value < 0) {
+    if (!Number.isFinite(value) || Math.abs(value) > 864e13) {
       throw new HTTPException(400, { message: "\u65F6\u95F4\u683C\u5F0F\u4E0D\u6B63\u786E" });
     }
     await setCurrentTime(value);

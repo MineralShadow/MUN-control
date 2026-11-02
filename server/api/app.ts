@@ -197,7 +197,7 @@ async function validateEventInput(
   if (!title) throw new HTTPException(400, { message: '事件标题不能为空' })
 
   const eventTimeRaw = Number(body.eventTime)
-  const eventTime = Number.isFinite(eventTimeRaw) && eventTimeRaw > 0
+  const eventTime = Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 8.64e15
     ? Math.round(eventTimeRaw)
     : currentTime
 
@@ -275,7 +275,7 @@ app.post('/api/time', async (c) => {
   const value = Number(body.value)
 
   if (action === 'set') {
-    if (!Number.isFinite(value) || value < 0) {
+    if (!Number.isFinite(value) || Math.abs(value) > 8.64e15) {
       throw new HTTPException(400, { message: '时间格式不正确' })
     }
     await setCurrentTime(value)
