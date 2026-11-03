@@ -87,7 +87,7 @@ React 19 + Vite 8  ──fetch /api/*──▶  Hono 4（Vercel Serverless / Nod
 ```
 
 - 认证：Cookie 会话（HttpOnly、SameSite=Lax、线上 Secure），密码 scrypt 加盐。
-- 数据：`meeting` 保存会议状态 JSON + revision；`time_state`；`events` + `event_recipients` + `event_reads`；`files`；`accounts`（含 seat_id）+ `sessions`；`archives` 线上完整存档。
+- 数据：`conferences` + `conference_members`；`conference_meeting` 保存每个会场的状态；`conference_time`；`events`/`files`/`archives` 均带 conference_id；账号与席位绑定在 membership；`sessions` 记录当前会场。
 - 实时：前端默认每 **2 秒**轮询 `/api/bootstrap`；可在设置切换 2/5/10 秒；事件弹窗随轮询出现。
 - 定时发布：GitHub Actions 定时调用 `/api/cron`（不依赖 Vercel Hobby 的每日 cron 限制）。
 - 首次请求自动建表并写入初始主席账号，无需手动执行 SQL。
@@ -140,7 +140,7 @@ Vercel 部署见 **[部署指南.md](部署指南.md)**；阿里云 ECS 部署�
 - `vite build` 通过：62 模块，JS 316 KB（gzip 94 KB），CSS 48 KB（gzip 10 KB）。
 - 后端集成测试：登录/账号/会议写入/权限拒绝/时间/定时事件/危机/文件上传下载。
 - 浏览器端到端：登录登出、主席/代表权限、公开/秘密事件可见性、主席弹窗、事件表单、席位计票、账号绑定、线上存档；无运行时异常。
-- API 集成测试：1920 年时间、公开/秘密/危机事件、已读、存档含文件、清空数据、删除账号保护初始主席。
+- API 集成测试：多会场隔离/切换、1920 年时间、公开/秘密/危机事件、阁首/文件权限/联署、会议主持动议、存档含文件、分类清除、初始主席保护、Web Push 公钥。
 - 演示截图：`正式文件/预览/`。
 
 ## 九、已知边界
