@@ -13,15 +13,17 @@ import {
   requiredPresentSeats,
 } from '../../lib/attendance'
 import { useConference } from '../../state/ConferenceContext'
-import type { AttendanceRule, Delegation } from '../../types'
+import type { AttendanceRule, Delegation, VoteMode } from '../../types'
+import { effectiveDelegationVotes, delegationTotalVotes } from '../../lib/votes'
 import { SeatRow } from './SeatRow'
 
 interface DelegationCardProps {
   delegation: Delegation
   rule: AttendanceRule
+  voteMode: VoteMode
 }
 
-export function DelegationCard({ delegation, rule }: DelegationCardProps) {
+export function DelegationCard({ delegation, rule, voteMode }: DelegationCardProps) {
   const { dispatch, me } = useConference()
   const confirm = useConfirm()
   const toast = useToast()
@@ -31,6 +33,8 @@ export function DelegationCard({ delegation, rule }: DelegationCardProps) {
   const presentCount = countPresentSeats(delegation)
   const required = requiredPresentSeats(delegation.seats.length, rule)
   const present = isDelegationPresent(delegation, rule)
+  const totalVotes = delegationTotalVotes(delegation, voteMode)
+  const effectiveVotes = effectiveDelegationVotes(delegation, voteMode)
 
   function addSeat(event: FormEvent) {
     event.preventDefault()
@@ -40,7 +44,7 @@ export function DelegationCard({ delegation, rule }: DelegationCardProps) {
     dispatch({
       type: 'seat/add',
       delegationId: delegation.id,
-      seat: { id: createId('seat'), name, present: false },
+      seat: { id: createId('seat'), name, votes: 1, present: false },
     })
     setNewSeatName('')
     toast(`已为「${delegation.name}」添加席位`, 'success')
@@ -111,25 +115,29 @@ export function DelegationCard({ delegation, rule }: DelegationCardProps) {
         <span className="meta-sep" aria-hidden="true">
           ·
         </span>
-        <span className="meta-votes">{delegation.votes} 票</span>
+        <span className="meta-votes">{effectiveVotes} 票{voteMode === 'MEMBER' ? `（合计 ${totalVotes}）` : ''}</span>
       </div>
 
       <div className={`delegation-controls${canEdit ? '' : ' is-readonly'}`}>
         {canEdit ? (
           <>
-            <label className="control-field">
-              <span className="control-label">票权</span>
-              <NumberStepper
-                value={delegation.votes}
-                min={0}
-                max={999}
-                onChange={(votes) =>
-                  dispatch({ type: 'delegation/setVotes', id: delegation.id, votes })
-                }
-                ariaLabel={`${delegation.name}的票权`}
-                suffix="票"
-              />
-            </label>
+            {voteMode === 'DELEGATION' ? (
+              <label className="control-field">
+                <span className="control-label">票权</span>
+                <NumberStepper
+                  value={delegation.votes}
+                  min={0}
+                  max={999}
+                  onChange={(votes) =>
+                    dispatch({ type: 'delegation/setVotes', id: delegation.id, votes })
+                  }
+                  ariaLabel={`${delegation.name}的票权`}
+                  suffix="票"
+                />
+              </label>
+            ) : (
+              <span className="control-label">席位票权合计 {totalVotes} 票</span>
+            )}
             <label className="control-field">
               <span className="control-label">全局一票否决</span>
               <Toggle
@@ -143,7 +151,7 @@ export function DelegationCard({ delegation, rule }: DelegationCardProps) {
           </>
         ) : (
           <>
-            <span className="control-label">票权 {delegation.votes} 票</span>
+            <span className="control-label">票权 {effectiveVotes} 票</span>
             <span className="control-label">
               全局一票否决：{delegation.globalVeto ? '有' : '无'}
             </span>
@@ -160,6 +168,7 @@ export function DelegationCard({ delegation, rule }: DelegationCardProps) {
             seat={seat}
             index={index}
             canDelete={delegation.seats.length > 1}
+            voteMode={voteMode}
           />
         ))}
       </ul>

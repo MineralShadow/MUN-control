@@ -10,6 +10,7 @@ import {
   toVoteResult,
 } from '../../lib/voting'
 import { getPresentDelegations } from '../../state/selectors'
+import { effectiveDelegationVotes } from '../../lib/votes'
 import { useConference } from '../../state/ConferenceContext'
 import type {
   Ballot,
@@ -42,7 +43,10 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
 
   const present = getPresentDelegations(state)
   const presentIds = new Set(present.map((delegation) => delegation.id))
-  const presentVotes = present.reduce((sum, delegation) => sum + delegation.votes, 0)
+  const presentVotes = present.reduce(
+    (sum, delegation) => sum + effectiveDelegationVotes(delegation, state.voteMode),
+    0,
+  )
 
   const steps: WizardStep[] = []
   if (!state.settings.skipMajorityStep) steps.push('majority')
@@ -65,7 +69,7 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
   const records: BallotRecord[] = state.delegations.map((delegation) => ({
     delegationId: delegation.id,
     name: delegation.name,
-    votes: delegation.votes,
+    votes: effectiveDelegationVotes(delegation, state.voteMode),
     ballot: presentIds.has(delegation.id) ? ballots[delegation.id] ?? 'ABSENT' : 'ABSENT',
     veto: vetoIds.includes(delegation.id),
   }))
@@ -253,7 +257,7 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
                     {!presentIds.has(delegation.id) ? (
                       <span className="badge badge-muted">缺席</span>
                     ) : null}
-                    <span className="veto-votes">{delegation.votes} 票</span>
+                    <span className="veto-votes">{effectiveDelegationVotes(delegation, state.voteMode)} 票</span>
                   </label>
                 )
               })}
@@ -301,6 +305,7 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
                 ballots={ballots}
                 onBallot={chooseBallot}
                 vetoIds={vetoIds}
+                voteMode={state.voteMode}
               />
             )}
           </div>

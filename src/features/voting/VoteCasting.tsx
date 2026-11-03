@@ -1,11 +1,13 @@
 import { BALLOT_LABEL } from '../../lib/voting'
-import type { Ballot, Delegation } from '../../types'
+import { effectiveDelegationVotes } from '../../lib/votes'
+import type { Ballot, Delegation, VoteMode } from '../../types'
 
 interface VoteCastingProps {
   delegations: Delegation[]
   ballots: Record<string, Ballot | undefined>
   onBallot: (delegationId: string, ballot: Ballot) => void
   vetoIds: string[]
+  voteMode: VoteMode
 }
 
 const OPTIONS: Ballot[] = ['YES', 'NO', 'ABSTAIN']
@@ -15,6 +17,7 @@ export function VoteCasting({
   ballots,
   onBallot,
   vetoIds,
+  voteMode,
 }: VoteCastingProps) {
   return (
     <div className="ballot-list">
@@ -27,7 +30,7 @@ export function VoteCasting({
                 {String(index + 1).padStart(2, '0')}
               </span>
               <span className="ballot-name">{delegation.name}</span>
-              <span className="ballot-votes">{delegation.votes} 票</span>
+              <span className="ballot-votes">{effectiveDelegationVotes(delegation, voteMode)} 票</span>
               {vetoIds.includes(delegation.id) ? (
                 <span className="badge badge-veto">否决国</span>
               ) : null}

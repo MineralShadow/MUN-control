@@ -30,6 +30,8 @@ interface ConferenceContextValue {
   accounts: AccountInfo[]
   revision: number
   serverNow: number
+  pollMs: number
+  setPollMs: (ms: number) => void
   dispatch: (action: Action) => void
   refresh: () => Promise<void>
   logout: () => Promise<void>
@@ -46,9 +48,17 @@ function mergeBootstrap(previous: Bootstrap | null, next: Bootstrap): Bootstrap 
   }
 }
 
+const POLL_KEY = 'mun_poll_ms'
+const POLL_OPTIONS = [2000, 5000, 10000]
+
 export function ConferenceProvider({ children }: { children: ReactNode }) {
   const toast = useToast()
   const [data, setData] = useState<Bootstrap | null>(null)
+  const [pollMs, setPollMsState] = useState(() => {
+    if (typeof window === 'undefined') return 2000
+    const saved = Number(window.localStorage.getItem(POLL_KEY))
+    return POLL_OPTIONS.includes(saved) ? saved : 2000
+  })
   const [loading, setLoading] = useState(true)
   const [fatal, setFatal] = useState<string | null>(null)
 
@@ -83,8 +93,9 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
     if (!data?.me) return
 
     const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load(true)
-    }, 2500)
+      // 后台标签页也轮询，才能接收事件通知；浏览器可能会自动降频。
+      void load(true)
+    }, pollMs)
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load(true)
@@ -97,7 +108,13 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [data?.me, load])
+  }, [data?.me, load, pollMs])
+
+  const setPollMs = useCallback((ms: number) => {
+    if (!POLL_OPTIONS.includes(ms)) return
+    setPollMsState(ms)
+    if (typeof window !== 'undefined') window.localStorage.setItem(POLL_KEY, String(ms))
+  }, [])
 
   const refresh = useCallback(async () => {
     await load(false)
@@ -167,11 +184,13 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
       accounts: data.accounts,
       revision: data.revision,
       serverNow: data.serverNow,
+      pollMs,
+      setPollMs,
       dispatch,
       refresh,
       logout,
     }
-  }, [data, dispatch, refresh, logout])
+  }, [data, dispatch, refresh, logout, pollMs, setPollMs])
 
   if (loading && !data) {
     return (

@@ -1,7 +1,7 @@
 import type { Author, ConferenceState, Settings } from '../types'
 
 export const DEFAULT_THEME = '历史委员会'
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const DEFAULT_AUTHOR: Author = {
   name: '🌟天马司我祝你星途璀璨',
@@ -21,6 +21,7 @@ export function createInitialState(): ConferenceState {
     theme: DEFAULT_THEME,
     author: { ...DEFAULT_AUTHOR },
     attendanceRule: 'ALL',
+    voteMode: 'DELEGATION',
     delegations: [],
     sessions: [],
     currentSessionId: null,

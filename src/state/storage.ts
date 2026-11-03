@@ -12,6 +12,7 @@ import type {
   Session,
   Settings,
   Topic,
+  VoteMode,
   VoteReason,
   VoteResult,
 } from '../types'
@@ -69,6 +70,7 @@ function normalizeSeat(value: unknown, index: number): Seat | null {
   return {
     id: asText(value.id) || createId('seat'),
     name,
+    votes: clampInt(toInt(value.votes, 1), 0, 999),
     present: value.present === true,
   }
 }
@@ -81,7 +83,7 @@ function normalizeDelegation(value: unknown, index: number): Delegation | null {
     .map((seat, seatIndex) => normalizeSeat(seat, seatIndex))
     .filter((seat): seat is Seat => seat !== null)
   if (seats.length === 0) {
-    seats.push({ id: createId('seat'), name: '代表 1', present: false })
+    seats.push({ id: createId('seat'), name: '代表 1', votes: 1, present: false })
   }
   return {
     id: asText(value.id) || createId('dlg'),
@@ -213,6 +215,11 @@ export function normalizeState(input: unknown): ConferenceState | null {
     ? input.attendanceRule
     : 'ALL'
 
+  const voteMode: VoteMode =
+    input.voteMode === 'MEMBER' || input.voteMode === 'DELEGATION'
+      ? input.voteMode
+      : 'DELEGATION'
+
   const rawDelegations = Array.isArray(input.delegations) ? input.delegations : []
   const delegations = rawDelegations
     .map((delegation, index) => normalizeDelegation(delegation, index))
@@ -275,6 +282,7 @@ export function normalizeState(input: unknown): ConferenceState | null {
     theme,
     author,
     attendanceRule,
+    voteMode,
     delegations,
     sessions,
     currentSessionId,

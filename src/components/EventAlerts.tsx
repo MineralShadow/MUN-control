@@ -7,14 +7,12 @@ import { useToast } from './Toast'
 
 /** 代表端：未读事件在任意页面顶部弹出，包含事件时间与标题 */
 export function EventAlerts() {
-  const { me, events, refresh } = useConference()
+  const { events, refresh } = useConference()
   const toast = useToast()
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  if (me.role !== 'delegate') return null
-
   const unread = events
-    .filter((event) => event.publishedAt && !event.read)
+    .filter((event) => event.publishedAt && event.inAudience && !event.read)
     .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
 
   if (unread.length === 0) return null
@@ -43,6 +41,9 @@ export function EventAlerts() {
           <div className="event-alert-body">
             <div className="event-alert-time">
               {formatDateTime(event.eventTime)}
+              <span className={`badge ${event.visibility === 'PUBLIC' ? 'badge-public' : 'badge-secret'}`}>
+                {event.visibility === 'PUBLIC' ? '公开' : '秘密'}
+              </span>
               {event.isCrisis ? <span className="badge badge-crisis">危机</span> : null}
             </div>
             <div className="event-alert-title">{event.title}</div>

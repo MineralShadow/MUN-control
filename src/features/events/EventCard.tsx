@@ -30,6 +30,9 @@ export function EventCard({
             <span className={`badge ${published ? 'badge-published' : 'badge-scheduled'}`}>
               {published ? '已发布' : '定时发布'}
             </span>
+            <span className={`badge ${event.visibility === 'PUBLIC' ? 'badge-public' : 'badge-secret'}`}>
+              {event.visibility === 'PUBLIC' ? '公开' : '秘密'}
+            </span>
             {event.isCrisis ? <span className="badge badge-crisis">危机事件</span> : null}
           </div>
           <h2 className="event-title">{event.title}</h2>
@@ -37,6 +40,16 @@ export function EventCard({
 
         {canEdit ? (
           <div className="event-actions">
+            {published && event.read !== null ? (
+              <button
+                type="button"
+                className={`read-toggle${event.read ? ' is-read' : ''}`}
+                disabled={busy}
+                onClick={() => onToggleRead(!event.read)}
+              >
+                {event.read ? '已读' : '未读'}
+              </button>
+            ) : null}
             <span className="read-count">
               已读 {event.readCount} / {event.recipientCount}
             </span>
@@ -67,10 +80,12 @@ export function EventCard({
           <>
             <span>
               展示给：
-              {recipientNames.length > 0
-                ? recipientNames.slice(0, 6).join('、') +
-                  (recipientNames.length > 6 ? ` 等 ${recipientNames.length} 个账号` : '')
-                : '未选择账号（仅主席可见）'}
+              {event.visibility === 'PUBLIC'
+                ? '所有账号（含主席团）'
+                : recipientNames.length > 0
+                  ? recipientNames.slice(0, 6).join('、') +
+                    (recipientNames.length > 6 ? ` 等 ${recipientNames.length} 个账号` : '')
+                  : '未选择账号（仅主席可见）'}
             </span>
             {!published ? <span className="event-hint">到达事件时间后自动发布</span> : null}
             {event.isCrisis && published ? (

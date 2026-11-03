@@ -1,19 +1,30 @@
-import { useRef, type ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { Segmented } from '../components/Segmented'
 import { Toggle } from '../components/Toggle'
 import { useConfirm } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
 import { AccountsManager } from '../features/settings/AccountsManager'
+import { ArchivesManager } from '../features/settings/ArchivesManager'
 import { formatDateTime } from '../lib/format'
+import { apiFetch } from '../lib/api'
+import {
+  notificationPermission,
+  requestNotificationPermission,
+  type NotificationPermissionState,
+} from '../lib/notifications'
 import { MAJORITY_OPTIONS, majorityLabel } from '../lib/voting'
 import { useConference } from '../state/ConferenceContext'
 import { exportStateFile, importStateFile } from '../state/storage'
 
 export function SettingsPage() {
-  const { state, me, dispatch } = useConference()
+  const { state, me, dispatch, refresh, pollMs, setPollMs } = useConference()
   const confirm = useConfirm()
   const toast = useToast()
+  const [permission, setPermission] = useState<NotificationPermissionState>(() =>
+    notificationPermission(),
+  )
+  const [archiveKey, setArchiveKey] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canEdit = me.role === 'chair'
 
@@ -49,15 +60,20 @@ export function SettingsPage() {
   async function handleReset() {
     if (!canEdit) return
     const ok = await confirm({
-      title: '清空会议数据？',
+      title: '彻底清空会场数据？',
       message:
-        '代表团、席位、会期、议题、决议与会议设置都会恢复初始状态。账号、事件与文件不受影响。',
-      confirmText: '确认清空',
+        '会场名称、席位、会期、议题、决议、设置、会议时间、事件、文件、线上存档与所有代表账号都会删除；主席账号会保留。此操作不可撤销。',
+      confirmText: '彻底清空',
       danger: true,
     })
-    if (ok) {
-      dispatch({ type: 'state/reset' })
-      toast('会议数据已恢复初始状态', 'success')
+    if (!ok) return
+    try {
+      await apiFetch('/admin/clear', { method: 'POST' })
+      await refresh()
+      setArchiveKey((value) => value + 1)
+      toast('会场数据已彻底清空', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '清空失败', 'danger')
     }
   }
 
@@ -134,6 +150,7 @@ export function SettingsPage() {
       </section>
 
       {canEdit ? <AccountsManager /> : null}
+      {canEdit ? <ArchivesManager key={archiveKey} /> : null}
 
       {canEdit ? (
         <section className="settings-card">
@@ -177,8 +194,8 @@ export function SettingsPage() {
 
           <div className="setting-row setting-row-danger">
             <div className="setting-copy">
-              <h3>清空会议数据</h3>
-              <p>恢复会议规则初始状态；账号、事件与文件保留。</p>
+              <h3>彻底清空会场数据</h3>
+              <p>删除会场名称、时间、事件、文件、存档与代表账号；保留主席账号。</p>
             </div>
             <button type="button" className="btn btn-danger" onClick={handleReset}>
               清空
@@ -193,6 +210,62 @@ export function SettingsPage() {
       ) : (
         <div className="notice">账号管理、数据导入导出与清空仅主席可见。</div>
       )}
+
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>刷新与通知</h2>
+          <p>刷新频率只影响当前浏览器；事件仍在服务端按会议时间发布。</p>
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-copy">
+            <h3>数据刷新频率</h3>
+            <p>默认 2 秒；5 秒 / 10 秒更省流量，但事件提醒会更慢。</p>
+          </div>
+          <Segmented
+            value={String(pollMs)}
+            options={[
+              { value: '2000', label: '2 秒' },
+              { value: '5000', label: '5 秒' },
+              { value: '10000', label: '10 秒' },
+            ]}
+            onChange={(value) => setPollMs(Number(value))}
+            ariaLabel="数据刷新频率"
+            size="sm"
+          />
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-copy">
+            <h3>浏览器通知</h3>
+            <p>
+              授权后，页面在后台标签页时收到公开或发给你的秘密事件，会弹出系统通知。
+              浏览器完全关闭时不保证送达；要彻底离线推送需要 Web Push。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={permission === 'granted' || permission === 'unsupported'}
+            onClick={() => {
+              void requestNotificationPermission().then((next) => {
+                setPermission(next)
+                if (next === 'granted') toast('已启用浏览器通知', 'success')
+                else if (next === 'denied') toast('通知权限被拒绝，可在浏览器设置中恢复', 'danger')
+                else if (next === 'unsupported') toast('当前浏览器不支持通知', 'danger')
+              })
+            }}
+          >
+            {permission === 'granted'
+              ? '通知已启用'
+              : permission === 'denied'
+                ? '通知已被拒绝'
+                : permission === 'unsupported'
+                  ? '浏览器不支持'
+                  : '启用通知'}
+          </button>
+        </div>
+      </section>
 
       <section className="settings-card">
         <div className="settings-card-head">

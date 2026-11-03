@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { routeLabel, type RoutePath } from '../router'
 import { useConference } from '../state/ConferenceContext'
 import { EventAlerts } from './EventAlerts'
+import { EventNotifier } from './EventNotifier'
 import { HeaderBar } from './HeaderBar'
 
 interface AppShellProps {
@@ -23,6 +24,7 @@ export function AppShell({ route, children }: AppShellProps) {
   return (
     <div className="app">
       <HeaderBar route={route} />
+      <EventNotifier />
       <EventAlerts />
       <main className="app-main">
         <div className="container">{children}</div>

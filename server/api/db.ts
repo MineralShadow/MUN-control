@@ -11,6 +11,7 @@ const SCHEMA = [
     password TEXT NOT NULL,
     name TEXT NOT NULL,
     role TEXT NOT NULL,
+    seat_id TEXT,
     created_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS sessions (
@@ -40,6 +41,7 @@ const SCHEMA = [
     content TEXT NOT NULL,
     event_time INTEGER NOT NULL,
     is_crisis INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'SECRET',
     published_at INTEGER,
     created_at INTEGER NOT NULL,
     created_by TEXT NOT NULL
@@ -49,6 +51,18 @@ const SCHEMA = [
     account_id TEXT NOT NULL,
     read INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (event_id, account_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS event_reads (
+    event_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    read INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, account_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS archives (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    data BLOB NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
@@ -164,9 +178,32 @@ async function seed(): Promise<void> {
   }
 }
 
+async function ensureColumn(
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const db = getDb()
+  const info = await db.execute(`PRAGMA table_info(${table})`)
+  if (!info.rows.some((row) => String(row.name) === column)) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+  }
+}
+
 async function init(): Promise<void> {
   const db = getDb()
   await db.batch(SCHEMA)
+  await ensureColumn('accounts', 'seat_id', 'seat_id TEXT')
+  await ensureColumn(
+    'events',
+    'visibility',
+    "visibility TEXT NOT NULL DEFAULT 'SECRET'",
+  )
+  // 旧事件的逐账号已读状态迁移到新的 event_reads
+  await db.execute(
+    `INSERT OR IGNORE INTO event_reads (event_id, account_id, read)
+     SELECT event_id, account_id, read FROM event_recipients`,
+  )
   await seed()
 }
 

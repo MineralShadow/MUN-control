@@ -2,8 +2,9 @@ import { EditableText } from '../../components/EditableText'
 import { StatusDot } from '../../components/StatusDot'
 import { useConfirm } from '../../components/ConfirmDialog'
 import { useToast } from '../../components/Toast'
+import { NumberStepper } from '../../components/NumberStepper'
 import { useConference } from '../../state/ConferenceContext'
-import type { Seat } from '../../types'
+import type { Seat, VoteMode } from '../../types'
 
 interface SeatRowProps {
   delegationId: string
@@ -11,6 +12,7 @@ interface SeatRowProps {
   seat: Seat
   index: number
   canDelete: boolean
+  voteMode: VoteMode
 }
 
 export function SeatRow({
@@ -19,6 +21,7 @@ export function SeatRow({
   seat,
   index,
   canDelete,
+  voteMode,
 }: SeatRowProps) {
   const { dispatch, me } = useConference()
   const confirm = useConfirm()
@@ -63,6 +66,22 @@ export function SeatRow({
         ariaLabel="席位名称"
         editable={canEdit}
       />
+      {voteMode === 'MEMBER' ? (
+        canEdit ? (
+          <NumberStepper
+            value={seat.votes}
+            min={0}
+            max={999}
+            onChange={(votes) =>
+              dispatch({ type: 'seat/setVotes', delegationId, seatId: seat.id, votes })
+            }
+            ariaLabel={`${seat.name}的票权`}
+            suffix="票"
+          />
+        ) : (
+          <span className="control-label">票权 {seat.votes} 票</span>
+        )
+      ) : null}
       <StatusDot
         tone={seat.present ? 'present' : 'absent'}
         clickable={canEdit}

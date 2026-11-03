@@ -6,7 +6,7 @@ import { useConference } from '../../state/ConferenceContext'
 import type { AccountInfo } from '../../types'
 
 export function AccountsManager() {
-  const { accounts, me, refresh } = useConference()
+  const { accounts, me, state, refresh } = useConference()
   const confirm = useConfirm()
   const toast = useToast()
 
@@ -17,6 +17,26 @@ export function AccountsManager() {
 
   const [resetId, setResetId] = useState<string | null>(null)
   const [resetPassword, setResetPassword] = useState('')
+
+  const seatOptions = state.delegations.flatMap((delegation) =>
+    delegation.seats.map((seat) => ({
+      id: seat.id,
+      label: `${delegation.name} · ${seat.name}`,
+    })),
+  )
+
+  async function bindSeat(account: AccountInfo, seatId: string) {
+    try {
+      await apiFetch(`/accounts/${account.id}`, {
+        method: 'PATCH',
+        json: { seatId: seatId || null },
+      })
+      await refresh()
+      toast(seatId ? '席位已绑定' : '已解除席位绑定', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '绑定失败', 'danger')
+    }
+  }
 
   async function createAccount(event: FormEvent) {
     event.preventDefault()
@@ -72,7 +92,7 @@ export function AccountsManager() {
   async function removeAccount(account: AccountInfo) {
     const ok = await confirm({
       title: `删除账号「${account.name}」？`,
-      message: '该代表将无法登录；其已提交的文件仍保留在主席团文件中。',
+      message: '该账号将无法登录；已提交文件仍保留，席位不会被删除。',
       confirmText: '删除账号',
       danger: true,
     })
@@ -135,6 +155,25 @@ export function AccountsManager() {
               {account.role === 'chair' ? '主席' : '代表'}
             </span>
 
+            {account.role === 'delegate' ? (
+              <label className="account-seat">
+                <span>绑定席位</span>
+                <select
+                  className="select select-sm"
+                  value={account.seatId ?? ''}
+                  onChange={(event) => void bindSeat(account, event.target.value)}
+                  aria-label={`${account.name}绑定的席位`}
+                >
+                  <option value="">未绑定</option>
+                  {seatOptions.map((seat) => (
+                    <option key={seat.id} value={seat.id}>
+                      {seat.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
             <div className="account-actions">
               {resetId === account.id ? (
                 <div className="account-reset">
@@ -177,7 +216,7 @@ export function AccountsManager() {
                 </button>
               )}
 
-              {account.role === 'delegate' ? (
+              {account.username !== '123456' && account.id !== me.id ? (
                 <button
                   type="button"
                   className="btn-icon"

@@ -10,10 +10,11 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "node --experimental-strip-types server/dev.ts",
-    "build": "pnpm build:api && tsc --noEmit && vite build",
+    "build": "pnpm build:api && pnpm build:cron && tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "build:api": "esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/index.js --log-level=warning"
+    "build:api": "esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/index.js --log-level=warning",
+    "build:cron": "esbuild server/cron-handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/cron.js --log-level=warning"
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",

@@ -2248,3 +2248,19 @@
     font-size: 27px;
   }
 }
+
+/* ---------- 计票方式与代表票权 ---------- */
+
+.vote-mode-bar {
+  margin-top: -6px;
+}
+
+.vote-mode-bar .select {
+  min-width: 150px;
+}
+
+.seat-row .stepper {
+  margin-left: auto;
+  transform: scale(0.92);
+  transform-origin: right center;
+}

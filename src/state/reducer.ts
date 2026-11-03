@@ -7,6 +7,7 @@ import type {
   Session,
   Settings,
   Topic,
+  VoteMode,
   VoteResult,
 } from '../types'
 import { clampInt } from '../lib/format.ts'
@@ -16,6 +17,7 @@ export type Action =
   | { type: 'theme/set'; theme: string }
   | { type: 'author/set'; patch: Partial<Author> }
   | { type: 'attendanceRule/set'; rule: ConferenceState['attendanceRule'] }
+  | { type: 'voteMode/set'; mode: VoteMode }
   | { type: 'delegation/add'; delegation: Delegation }
   | { type: 'delegation/rename'; id: string; name: string }
   | { type: 'delegation/delete'; id: string }
@@ -25,6 +27,7 @@ export type Action =
   | { type: 'seat/rename'; delegationId: string; seatId: string; name: string }
   | { type: 'seat/delete'; delegationId: string; seatId: string }
   | { type: 'seat/togglePresent'; delegationId: string; seatId: string }
+  | { type: 'seat/setVotes'; delegationId: string; seatId: string; votes: number }
   | { type: 'session/add'; session: Session }
   | { type: 'session/rename'; id: string; name: string }
   | { type: 'session/delete'; id: string }
@@ -89,6 +92,11 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
       return state.attendanceRule === action.rule
         ? state
         : { ...state, attendanceRule: action.rule }
+
+    case 'voteMode/set':
+      return state.voteMode === action.mode
+        ? state
+        : { ...state, voteMode: action.mode }
 
     case 'delegation/add':
       return { ...state, delegations: [...state.delegations, action.delegation] }
@@ -157,6 +165,18 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
           seat.id === action.seatId ? { ...seat, present: !seat.present } : seat,
         ),
       }))
+
+    case 'seat/setVotes': {
+      const votes = clampInt(action.votes, 0, 999)
+      return mapDelegation(state, action.delegationId, (delegation) => ({
+        ...delegation,
+        seats: delegation.seats.map((seat) =>
+          seat.id === action.seatId && seat.votes !== votes
+            ? { ...seat, votes }
+            : seat,
+        ),
+      }))
+    }
 
     case 'session/add':
       return { ...state, sessions: [...state.sessions, action.session] }

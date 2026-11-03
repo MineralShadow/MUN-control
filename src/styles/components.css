@@ -1032,3 +1032,111 @@
     justify-content: flex-end;
   }
 }
+
+/* ---------- 公开/秘密事件 ---------- */
+
+.badge-public {
+  border-color: rgba(47, 125, 92, 0.25);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.badge-secret {
+  border-color: rgba(112, 90, 160, 0.25);
+  background: rgba(112, 90, 160, 0.1);
+  color: #6b5597;
+}
+
+.event-visibility {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+}
+
+/* ---------- 账号席位与线上存档 ---------- */
+
+.account-seat {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.account-seat .select {
+  min-width: 150px;
+}
+
+.archive-create {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.archive-create .input {
+  flex: 1;
+}
+
+.archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.archive-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf9;
+}
+
+.archive-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.archive-info strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-info span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.archive-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+@media (max-width: 700px) {
+  .archive-create {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-seat {
+    width: 100%;
+  }
+
+  .account-seat .select {
+    flex: 1;
+  }
+}

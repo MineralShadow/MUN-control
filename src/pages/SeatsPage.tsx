@@ -12,7 +12,8 @@ import {
 } from '../lib/attendance'
 import { useConference } from '../state/ConferenceContext'
 import { getVoteStats } from '../state/selectors'
-import type { AttendanceRule, Delegation } from '../types'
+import type { AttendanceRule, Delegation, VoteMode } from '../types'
+import { voteModeLabel } from '../lib/votes'
 
 export function SeatsPage() {
   const { state, dispatch, me } = useConference()
@@ -27,6 +28,11 @@ export function SeatsPage() {
     toast(`出席规则已切换为「${attendanceRuleLabel(rule)}」`, 'success')
   }
 
+  function changeVoteMode(mode: VoteMode) {
+    dispatch({ type: 'voteMode/set', mode })
+    toast(`计票方式已切换为「${voteModeLabel(mode)}」`, 'success')
+  }
+
   function addDelegation(event: FormEvent) {
     event.preventDefault()
     const name = newName.trim()
@@ -39,7 +45,7 @@ export function SeatsPage() {
       name: name.slice(0, 40),
       votes: 1,
       globalVeto: false,
-      seats: [{ id: createId('seat'), name: '代表 1', present: false }],
+      seats: [{ id: createId('seat'), name: '代表 1', votes: 1, present: false }],
     }
     dispatch({ type: 'delegation/add', delegation })
     setNewName('')
@@ -84,6 +90,28 @@ export function SeatsPage() {
       <div className="rule-hint-bar">
         <strong>{attendanceRuleLabel(state.attendanceRule)}</strong>
         <span>{attendanceRuleHint(state.attendanceRule)}</span>
+      </div>
+
+      <div className="rule-hint-bar vote-mode-bar">
+        <strong>计票方式</strong>
+        {canEdit ? (
+          <select
+            className="select"
+            value={state.voteMode}
+            onChange={(event) => changeVoteMode(event.target.value as VoteMode)}
+            aria-label="计票方式"
+          >
+            <option value="DELEGATION">代表团总体计票</option>
+            <option value="MEMBER">代表计票</option>
+          </select>
+        ) : (
+          <span>{voteModeLabel(state.voteMode)}</span>
+        )}
+        <span>
+          {state.voteMode === 'DELEGATION'
+            ? '每个代表团使用一个总票权。'
+            : '按出席代表逐席累加票权，可在席位行内手动调整。'}
+        </span>
       </div>
 
       <AttendanceSummary stats={stats} rule={state.attendanceRule} />
@@ -139,6 +167,7 @@ export function SeatsPage() {
                 key={delegation.id}
                 delegation={delegation}
                 rule={state.attendanceRule}
+                voteMode={state.voteMode}
               />
             ))}
           </div>

@@ -35,10 +35,29 @@ export async function applyConferenceAction(
   const normalized = normalizeState(next) ?? next
   const revision = current.revision + 1
 
-  await getDb().execute({
+  const db = getDb()
+  await db.execute({
     sql: 'UPDATE meeting SET state = ?, revision = ?, updated_at = ? WHERE id = 1',
     args: [JSON.stringify(normalized), revision, Date.now()],
   })
+
+  // 删除席位/代表团后，账号不删除，只解绑已经消失的席位
+  const seatIds = new Set(
+    normalized.delegations.flatMap((delegation) =>
+      delegation.seats.map((seat) => seat.id),
+    ),
+  )
+  const bound = await db.execute(
+    'SELECT id, seat_id FROM accounts WHERE seat_id IS NOT NULL',
+  )
+  for (const row of bound.rows) {
+    if (!seatIds.has(String(row.seat_id))) {
+      await db.execute({
+        sql: 'UPDATE accounts SET seat_id = NULL WHERE id = ?',
+        args: [String(row.id)],
+      })
+    }
+  }
 
   return { state: normalized, revision }
 }

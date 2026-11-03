@@ -3263,7 +3263,7 @@ function mapDatabaseError(error, fallbackCode) {
 
 // src/state/defaults.ts
 var DEFAULT_THEME = "\u5386\u53F2\u59D4\u5458\u4F1A";
-var SCHEMA_VERSION = 1;
+var SCHEMA_VERSION = 2;
 var DEFAULT_AUTHOR = {
   name: "\u{1F31F}\u5929\u9A6C\u53F8\u6211\u795D\u4F60\u661F\u9014\u7480\u74A8",
   xiaohongshuId: "4277718409",
@@ -3280,6 +3280,7 @@ function createInitialState() {
     theme: DEFAULT_THEME,
     author: { ...DEFAULT_AUTHOR },
     attendanceRule: "ALL",
+    voteMode: "DELEGATION",
     delegations: [],
     sessions: [],
     currentSessionId: null,
@@ -3298,6 +3299,7 @@ var SCHEMA = [
     password TEXT NOT NULL,
     name TEXT NOT NULL,
     role TEXT NOT NULL,
+    seat_id TEXT,
     created_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS sessions (
@@ -3327,6 +3329,7 @@ var SCHEMA = [
     content TEXT NOT NULL,
     event_time INTEGER NOT NULL,
     is_crisis INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'SECRET',
     published_at INTEGER,
     created_at INTEGER NOT NULL,
     created_by TEXT NOT NULL
@@ -3336,6 +3339,18 @@ var SCHEMA = [
     account_id TEXT NOT NULL,
     read INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (event_id, account_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS event_reads (
+    event_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    read INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, account_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS archives (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    data BLOB NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
@@ -3424,9 +3439,26 @@ async function seed() {
     });
   }
 }
+async function ensureColumn(table, column, definition) {
+  const db = getDb();
+  const info = await db.execute(`PRAGMA table_info(${table})`);
+  if (!info.rows.some((row) => String(row.name) === column)) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  }
+}
 async function init() {
   const db = getDb();
   await db.batch(SCHEMA);
+  await ensureColumn("accounts", "seat_id", "seat_id TEXT");
+  await ensureColumn(
+    "events",
+    "visibility",
+    "visibility TEXT NOT NULL DEFAULT 'SECRET'"
+  );
+  await db.execute(
+    `INSERT OR IGNORE INTO event_reads (event_id, account_id, read)
+     SELECT event_id, account_id, read FROM event_recipients`
+  );
   await seed();
 }
 function ensureDb() {
@@ -3687,6 +3719,7 @@ function toEventRow(row) {
     content: String(row.content),
     event_time: Number(row.event_time),
     is_crisis: Number(row.is_crisis),
+    visibility: row.visibility === "PUBLIC" ? "PUBLIC" : "SECRET",
     published_at: row.published_at === null ? null : Number(row.published_at),
     created_at: Number(row.created_at),
     created_by: String(row.created_by)
@@ -3712,8 +3745,11 @@ async function publishDueEvents() {
 }
 async function getRecipients(eventId) {
   const result = await getDb().execute({
-    sql: `SELECT r.account_id, r.read, COALESCE(a.name, '\u5DF2\u5220\u9664\u8D26\u53F7') AS name
+    sql: `SELECT r.account_id, COALESCE(er.read, r.read) AS read,
+                 COALESCE(a.name, '\u5DF2\u5220\u9664\u8D26\u53F7') AS name
           FROM event_recipients r
+          LEFT JOIN event_reads er
+            ON er.event_id = r.event_id AND er.account_id = r.account_id
           LEFT JOIN accounts a ON a.id = r.account_id
           WHERE r.event_id = ?
           ORDER BY a.created_at ASC`,
@@ -3725,6 +3761,31 @@ async function getRecipients(eventId) {
     read: Number(row.read) === 1
   }));
 }
+async function getMyRead(eventId, accountId) {
+  const result = await getDb().execute({
+    sql: "SELECT read FROM event_reads WHERE event_id = ? AND account_id = ? LIMIT 1",
+    args: [eventId, accountId]
+  });
+  return Number(result.rows[0]?.read ?? 0) === 1;
+}
+async function countAccounts() {
+  const result = await getDb().execute("SELECT COUNT(*) AS n FROM accounts");
+  return Number(result.rows[0]?.n ?? 0);
+}
+async function countReads(eventId) {
+  const result = await getDb().execute({
+    sql: "SELECT COUNT(*) AS n FROM event_reads WHERE event_id = ? AND read = 1",
+    args: [eventId]
+  });
+  return Number(result.rows[0]?.n ?? 0);
+}
+async function isRecipient(eventId, accountId) {
+  const result = await getDb().execute({
+    sql: "SELECT 1 AS ok FROM event_recipients WHERE event_id = ? AND account_id = ? LIMIT 1",
+    args: [eventId, accountId]
+  });
+  return result.rows.length > 0;
+}
 function baseEvent(row) {
   return {
     id: row.id,
@@ -3732,43 +3793,59 @@ function baseEvent(row) {
     content: row.content,
     eventTime: row.event_time,
     isCrisis: row.is_crisis === 1,
+    visibility: row.visibility === "PUBLIC" ? "PUBLIC" : "SECRET",
     publishedAt: row.published_at,
     createdAt: row.created_at,
     createdBy: row.created_by
   };
 }
-async function listEventsForChair() {
+async function listEventsForChair(user) {
   const result = await getDb().execute(
     "SELECT * FROM events ORDER BY event_time DESC, created_at DESC"
   );
+  const totalAccounts = await countAccounts();
   const events = [];
   for (const raw2 of result.rows) {
     const row = toEventRow(raw2);
-    const recipients = await getRecipients(row.id);
+    const publicEvent = row.visibility === "PUBLIC";
+    const recipients = publicEvent ? [] : await getRecipients(row.id);
+    const inAudience = publicEvent || await isRecipient(row.id, user.id);
+    const read = inAudience ? await getMyRead(row.id, user.id) : null;
+    const readCount = publicEvent ? await countReads(row.id) : recipients.filter((item) => item.read).length;
     events.push({
       ...baseEvent(row),
       recipients,
-      read: null,
-      readCount: recipients.filter((item) => item.read).length,
-      recipientCount: recipients.length
+      inAudience,
+      read,
+      readCount,
+      recipientCount: publicEvent ? totalAccounts : recipients.length
     });
   }
   return events;
 }
 async function listEventsForDelegate(user) {
   const result = await getDb().execute({
-    sql: `SELECT e.*, r.read AS my_read
+    sql: `SELECT e.*, COALESCE(er.read, 0) AS my_read
           FROM events e
-          JOIN event_recipients r ON r.event_id = e.id
-          WHERE r.account_id = ? AND e.published_at IS NOT NULL
+          LEFT JOIN event_reads er
+            ON er.event_id = e.id AND er.account_id = ?
+          WHERE e.published_at IS NOT NULL
+            AND (
+              e.visibility = 'PUBLIC'
+              OR EXISTS (
+                SELECT 1 FROM event_recipients r
+                WHERE r.event_id = e.id AND r.account_id = ?
+              )
+            )
           ORDER BY e.event_time DESC, e.created_at DESC`,
-    args: [user.id]
+    args: [user.id, user.id]
   });
   return result.rows.map((raw2) => {
     const row = toEventRow(raw2);
     return {
       ...baseEvent(row),
       recipients: [],
+      inAudience: true,
       read: Number(raw2.my_read) === 1,
       readCount: Number(raw2.my_read) === 1 ? 1 : 0,
       recipientCount: 0
@@ -3776,7 +3853,7 @@ async function listEventsForDelegate(user) {
   });
 }
 async function listEvents(user) {
-  return user.role === "chair" ? listEventsForChair() : listEventsForDelegate(user);
+  return user.role === "chair" ? listEventsForChair(user) : listEventsForDelegate(user);
 }
 async function replaceRecipients(eventId, recipientIds) {
   const db = getDb();
@@ -3795,21 +3872,25 @@ async function createEvent(user, input) {
   const db = getDb();
   const id = createId("evt");
   const createdAt = Date.now();
+  const visibility = input.isCrisis ? "PUBLIC" : input.visibility;
   await db.execute({
     sql: `INSERT INTO events
-          (id, title, content, event_time, is_crisis, published_at, created_at, created_by)
-          VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+          (id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     args: [
       id,
       input.title,
       input.content,
       input.eventTime,
       input.isCrisis ? 1 : 0,
+      visibility,
       createdAt,
       user.id
     ]
   });
-  await replaceRecipients(id, input.recipientIds);
+  if (visibility === "SECRET") {
+    await replaceRecipients(id, input.recipientIds);
+  }
   await publishDueEvents();
   return id;
 }
@@ -3822,18 +3903,25 @@ async function updateEvent(eventId, input) {
   const raw2 = existing.rows[0];
   if (!raw2) return false;
   const row = toEventRow(raw2);
+  const visibility = input.isCrisis ? "PUBLIC" : input.visibility;
   await db.execute({
-    sql: `UPDATE events SET title = ?, content = ?, event_time = ?, is_crisis = ?
+    sql: `UPDATE events SET title = ?, content = ?, event_time = ?, is_crisis = ?,
+            visibility = ?
           WHERE id = ?`,
     args: [
       input.title,
       input.content,
       row.published_at ? row.event_time : input.eventTime,
       input.isCrisis ? 1 : 0,
+      visibility,
       eventId
     ]
   });
-  await replaceRecipients(eventId, input.recipientIds);
+  if (visibility === "SECRET") {
+    await replaceRecipients(eventId, input.recipientIds);
+  } else {
+    await replaceRecipients(eventId, []);
+  }
   if (row.published_at && !input.isCrisis) {
     await clearCrisisPause(eventId);
   }
@@ -3851,6 +3939,7 @@ async function deleteEvent(eventId) {
   });
   if (existing.rows.length === 0) return false;
   await db.execute({ sql: "DELETE FROM event_recipients WHERE event_id = ?", args: [eventId] });
+  await db.execute({ sql: "DELETE FROM event_reads WHERE event_id = ?", args: [eventId] });
   await db.execute({ sql: "DELETE FROM events WHERE id = ?", args: [eventId] });
   await clearCrisisPause(eventId);
   return true;
@@ -3858,14 +3947,24 @@ async function deleteEvent(eventId) {
 async function setEventRead(user, eventId, read) {
   const db = getDb();
   const result = await db.execute({
-    sql: "SELECT read FROM event_recipients WHERE event_id = ? AND account_id = ? LIMIT 1",
-    args: [eventId, user.id]
+    sql: "SELECT visibility, published_at FROM events WHERE id = ? LIMIT 1",
+    args: [eventId]
   });
-  if (result.rows.length === 0) return false;
+  const row = result.rows[0];
+  if (!row || row.published_at === null) return false;
+  const publicEvent = row.visibility === "PUBLIC";
+  if (!publicEvent && !await isRecipient(eventId, user.id)) return false;
   await db.execute({
-    sql: "UPDATE event_recipients SET read = ? WHERE event_id = ? AND account_id = ?",
-    args: [read ? 1 : 0, eventId, user.id]
+    sql: `INSERT INTO event_reads (event_id, account_id, read) VALUES (?, ?, ?)
+          ON CONFLICT(event_id, account_id) DO UPDATE SET read = excluded.read`,
+    args: [eventId, user.id, read ? 1 : 0]
   });
+  if (!publicEvent) {
+    await db.execute({
+      sql: "UPDATE event_recipients SET read = ? WHERE event_id = ? AND account_id = ?",
+      args: [read ? 1 : 0, eventId, user.id]
+    });
+  }
   return true;
 }
 
@@ -3995,6 +4094,8 @@ function baseReducer(state, action) {
     }
     case "attendanceRule/set":
       return state.attendanceRule === action.rule ? state : { ...state, attendanceRule: action.rule };
+    case "voteMode/set":
+      return state.voteMode === action.mode ? state : { ...state, voteMode: action.mode };
     case "delegation/add":
       return { ...state, delegations: [...state.delegations, action.delegation] };
     case "delegation/rename": {
@@ -4054,6 +4155,15 @@ function baseReducer(state, action) {
           (seat) => seat.id === action.seatId ? { ...seat, present: !seat.present } : seat
         )
       }));
+    case "seat/setVotes": {
+      const votes = clampInt(action.votes, 0, 999);
+      return mapDelegation(state, action.delegationId, (delegation) => ({
+        ...delegation,
+        seats: delegation.seats.map(
+          (seat) => seat.id === action.seatId && seat.votes !== votes ? { ...seat, votes } : seat
+        )
+      }));
+    }
     case "session/add":
       return { ...state, sessions: [...state.sessions, action.session] };
     case "session/rename": {
@@ -4265,6 +4375,7 @@ function normalizeSeat(value, index) {
   return {
     id: asText(value.id) || createId("seat"),
     name,
+    votes: clampInt(toInt(value.votes, 1), 0, 999),
     present: value.present === true
   };
 }
@@ -4274,7 +4385,7 @@ function normalizeDelegation(value, index) {
   const rawSeats = Array.isArray(value.seats) ? value.seats : [];
   const seats = rawSeats.map((seat, seatIndex) => normalizeSeat(seat, seatIndex)).filter((seat) => seat !== null);
   if (seats.length === 0) {
-    seats.push({ id: createId("seat"), name: "\u4EE3\u8868 1", present: false });
+    seats.push({ id: createId("seat"), name: "\u4EE3\u8868 1", votes: 1, present: false });
   }
   return {
     id: asText(value.id) || createId("dlg"),
@@ -4365,6 +4476,7 @@ function normalizeState(input) {
     xiaohongshuUrl: asText(rawAuthor.xiaohongshuUrl).trim().slice(0, 200)
   };
   const attendanceRule = isAttendanceRule(input.attendanceRule) ? input.attendanceRule : "ALL";
+  const voteMode = input.voteMode === "MEMBER" || input.voteMode === "DELEGATION" ? input.voteMode : "DELEGATION";
   const rawDelegations = Array.isArray(input.delegations) ? input.delegations : [];
   const delegations = rawDelegations.map((delegation, index) => normalizeDelegation(delegation, index)).filter((delegation) => delegation !== null);
   const rawSessions = Array.isArray(input.sessions) ? input.sessions : [];
@@ -4404,6 +4516,7 @@ function normalizeState(input) {
     theme,
     author,
     attendanceRule,
+    voteMode,
     delegations,
     sessions,
     currentSessionId,
@@ -4437,11 +4550,290 @@ async function applyConferenceAction(action) {
   const next = reducer(current.state, action);
   const normalized = normalizeState(next) ?? next;
   const revision = current.revision + 1;
-  await getDb().execute({
+  const db = getDb();
+  await db.execute({
     sql: "UPDATE meeting SET state = ?, revision = ?, updated_at = ? WHERE id = 1",
     args: [JSON.stringify(normalized), revision, Date.now()]
   });
+  const seatIds = new Set(
+    normalized.delegations.flatMap(
+      (delegation) => delegation.seats.map((seat) => seat.id)
+    )
+  );
+  const bound = await db.execute(
+    "SELECT id, seat_id FROM accounts WHERE seat_id IS NOT NULL"
+  );
+  for (const row of bound.rows) {
+    if (!seatIds.has(String(row.seat_id))) {
+      await db.execute({
+        sql: "UPDATE accounts SET seat_id = NULL WHERE id = ?",
+        args: [String(row.id)]
+      });
+    }
+  }
   return { state: normalized, revision };
+}
+
+// server/api/archives.ts
+function bytesToBase64(value) {
+  const bytes = value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array();
+  let binary = "";
+  const chunk = 32768;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+async function readArchiveData(value) {
+  let text2 = "";
+  if (value instanceof Uint8Array) {
+    text2 = new TextDecoder().decode(value);
+  } else if (value instanceof ArrayBuffer) {
+    text2 = new TextDecoder().decode(new Uint8Array(value));
+  } else if (typeof value === "string") {
+    text2 = value;
+  }
+  const parsed = JSON.parse(text2);
+  if (!parsed || parsed.version !== 1) throw new Error("\u5B58\u6863\u683C\u5F0F\u4E0D\u53D7\u652F\u6301");
+  return parsed;
+}
+async function listArchives() {
+  const result = await getDb().execute(
+    "SELECT id, name, created_at FROM archives ORDER BY created_at DESC"
+  );
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    createdAt: Number(row.created_at)
+  }));
+}
+async function createArchive(nameRaw) {
+  const db = getDb();
+  const [meeting, time, accounts, events, recipients, reads, files] = await Promise.all([
+    loadMeeting(),
+    getTimeState(),
+    db.execute("SELECT id, username, password, name, role, seat_id, created_at FROM accounts ORDER BY created_at ASC"),
+    db.execute("SELECT * FROM events ORDER BY created_at ASC"),
+    db.execute("SELECT event_id, account_id, read FROM event_recipients"),
+    db.execute("SELECT event_id, account_id, read FROM event_reads"),
+    db.execute("SELECT * FROM files ORDER BY submitted_at ASC")
+  ]);
+  const recipientRows = recipients.rows.map((row) => ({
+    eventId: String(row.event_id),
+    accountId: String(row.account_id),
+    read: Number(row.read) === 1
+  }));
+  const readRows = reads.rows.map((row) => ({
+    eventId: String(row.event_id),
+    accountId: String(row.account_id),
+    read: Number(row.read) === 1
+  }));
+  const data = {
+    version: 1,
+    archivedAt: Date.now(),
+    conference: meeting.state,
+    revision: meeting.revision,
+    accounts: accounts.rows.map((row) => ({
+      id: String(row.id),
+      username: String(row.username),
+      password: String(row.password),
+      name: String(row.name),
+      role: String(row.role),
+      seatId: row.seat_id ? String(row.seat_id) : null,
+      createdAt: Number(row.created_at)
+    })),
+    time: {
+      nowMs: time.currentMs,
+      rate: time.rate,
+      running: time.running,
+      crisisPaused: time.crisisPaused,
+      crisisEventId: time.crisisEventId
+    },
+    events: events.rows.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      content: String(row.content),
+      eventTime: Number(row.event_time),
+      isCrisis: Number(row.is_crisis) === 1,
+      visibility: String(row.visibility ?? "SECRET"),
+      publishedAt: row.published_at === null ? null : Number(row.published_at),
+      createdAt: Number(row.created_at),
+      createdBy: String(row.created_by),
+      recipients: recipientRows.filter((item) => item.eventId === String(row.id)).map((item) => ({ accountId: item.accountId, read: item.read })),
+      reads: readRows.filter((item) => item.eventId === String(row.id)).map((item) => ({ accountId: item.accountId, read: item.read }))
+    })),
+    files: files.rows.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      filename: String(row.filename),
+      mime: String(row.mime),
+      size: Number(row.size),
+      data: bytesToBase64(row.data),
+      submittedBy: String(row.submitted_by),
+      submittedAt: Number(row.submitted_at),
+      read: Number(row.read) === 1
+    }))
+  };
+  const id = createId("arc");
+  const name = (nameRaw ?? "").trim().slice(0, 80) || `${meeting.state.theme || "\u4F1A\u573A"} \xB7 ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}`;
+  const createdAt = Date.now();
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  await db.execute({
+    sql: "INSERT INTO archives (id, name, created_at, data) VALUES (?, ?, ?, ?)",
+    args: [id, name, createdAt, encoded]
+  });
+  return { id, name, createdAt };
+}
+async function deleteArchive(id) {
+  const db = getDb();
+  const result = await db.execute("DELETE FROM archives WHERE id = ?", [id]);
+  return result.rowsAffected > 0;
+}
+async function restoreArchive(id) {
+  const db = getDb();
+  const found = await db.execute({
+    sql: "SELECT data FROM archives WHERE id = ? LIMIT 1",
+    args: [id]
+  });
+  const row = found.rows[0];
+  if (!row) throw new Error("\u5B58\u6863\u4E0D\u5B58\u5728");
+  const data = await readArchiveData(row.data);
+  const state = normalizeState(data.conference) ?? createInitialState();
+  const current = await loadMeeting();
+  const revision = current.revision + 1;
+  const now = Date.now();
+  const statements = [
+    { sql: "DELETE FROM event_recipients" },
+    { sql: "DELETE FROM event_reads" },
+    { sql: "DELETE FROM events" },
+    { sql: "DELETE FROM files" },
+    { sql: "DELETE FROM accounts" },
+    { sql: "DELETE FROM sessions" },
+    { sql: "DELETE FROM meeting" },
+    { sql: "DELETE FROM time_state" },
+    {
+      sql: `INSERT INTO meeting (id, state, revision, updated_at) VALUES (1, ?, ?, ?)`,
+      args: [JSON.stringify(state), revision, now]
+    },
+    {
+      sql: `INSERT INTO time_state
+            (id, now_ms, rate, running, anchor_ms, crisis_paused, crisis_event_id, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        data.time.nowMs,
+        data.time.rate,
+        data.time.running ? 1 : 0,
+        now,
+        data.time.crisisPaused ? 1 : 0,
+        data.time.crisisEventId,
+        now
+      ]
+    }
+  ];
+  for (const account of data.accounts) {
+    statements.push({
+      sql: `INSERT INTO accounts (id, username, password, name, role, seat_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        account.id,
+        account.username,
+        account.password,
+        account.name,
+        account.role,
+        account.seatId,
+        account.createdAt
+      ]
+    });
+  }
+  for (const event of data.events) {
+    statements.push({
+      sql: `INSERT INTO events
+            (id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        event.id,
+        event.title,
+        event.content,
+        event.eventTime,
+        event.isCrisis ? 1 : 0,
+        event.visibility,
+        event.publishedAt,
+        event.createdAt,
+        event.createdBy
+      ]
+    });
+    for (const recipient of event.recipients) {
+      statements.push({
+        sql: "INSERT INTO event_recipients (event_id, account_id, read) VALUES (?, ?, ?)",
+        args: [event.id, recipient.accountId, recipient.read ? 1 : 0]
+      });
+    }
+    for (const read of event.reads) {
+      statements.push({
+        sql: "INSERT INTO event_reads (event_id, account_id, read) VALUES (?, ?, ?)",
+        args: [event.id, read.accountId, read.read ? 1 : 0]
+      });
+    }
+  }
+  for (const file of data.files) {
+    statements.push({
+      sql: `INSERT INTO files
+            (id, title, filename, mime, size, data, submitted_by, submitted_at, read)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        file.id,
+        file.title,
+        file.filename,
+        file.mime,
+        file.size,
+        base64ToBytes(file.data),
+        file.submittedBy,
+        file.submittedAt,
+        file.read ? 1 : 0
+      ]
+    });
+  }
+  await db.batch(statements);
+}
+
+// server/api/admin.ts
+async function clearAllData() {
+  const db = getDb();
+  const current = await loadMeeting();
+  const now = Date.now();
+  const revision = current.revision + 1;
+  const state = createInitialState();
+  await db.batch([
+    { sql: "DELETE FROM event_recipients" },
+    { sql: "DELETE FROM event_reads" },
+    { sql: "DELETE FROM events" },
+    { sql: "DELETE FROM files" },
+    { sql: "DELETE FROM archives" },
+    { sql: "DELETE FROM sessions WHERE account_id IN (SELECT id FROM accounts WHERE role <> 'chair')" },
+    { sql: "DELETE FROM accounts WHERE role <> 'chair'" },
+    { sql: "UPDATE accounts SET seat_id = NULL" },
+    {
+      sql: `INSERT INTO meeting (id, state, revision, updated_at) VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET state = excluded.state,
+              revision = excluded.revision, updated_at = excluded.updated_at`,
+      args: [JSON.stringify(state), revision, now]
+    },
+    {
+      sql: `INSERT INTO time_state
+            (id, now_ms, rate, running, anchor_ms, crisis_paused, crisis_event_id, updated_at)
+            VALUES (1, ?, 1, 0, ?, 0, NULL, ?)
+            ON CONFLICT(id) DO UPDATE SET now_ms = excluded.now_ms,
+              rate = 1, running = 0, anchor_ms = excluded.anchor_ms,
+              crisis_paused = 0, crisis_event_id = NULL, updated_at = excluded.updated_at`,
+      args: [now, now, now]
+    }
+  ]);
 }
 
 // server/api/app.ts
@@ -4504,6 +4896,7 @@ var ALLOWED_ACTIONS = /* @__PURE__ */ new Set([
   "theme/set",
   "author/set",
   "attendanceRule/set",
+  "voteMode/set",
   "delegation/add",
   "delegation/rename",
   "delegation/delete",
@@ -4513,6 +4906,7 @@ var ALLOWED_ACTIONS = /* @__PURE__ */ new Set([
   "seat/rename",
   "seat/delete",
   "seat/togglePresent",
+  "seat/setVotes",
   "session/add",
   "session/rename",
   "session/delete",
@@ -4544,17 +4938,33 @@ function text(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 async function listAccounts() {
-  const result = await getDb().execute(
-    `SELECT id, username, name, role, created_at FROM accounts
-     ORDER BY CASE role WHEN 'chair' THEN 0 ELSE 1 END, created_at ASC`
-  );
-  return result.rows.map((row) => ({
-    id: String(row.id),
-    username: String(row.username),
-    name: String(row.name),
-    role: row.role === "chair" ? "chair" : "delegate",
-    createdAt: Number(row.created_at)
-  }));
+  const [result, meeting] = await Promise.all([
+    getDb().execute(
+      `SELECT id, username, name, role, seat_id, created_at FROM accounts
+       ORDER BY CASE role WHEN 'chair' THEN 0 ELSE 1 END, created_at ASC`
+    ),
+    loadMeeting()
+  ]);
+  const seats = /* @__PURE__ */ new Map();
+  for (const delegation of meeting.state.delegations) {
+    for (const seat of delegation.seats) {
+      seats.set(seat.id, { seatName: seat.name, delegationName: delegation.name });
+    }
+  }
+  return result.rows.map((row) => {
+    const seatId = row.seat_id ? String(row.seat_id) : null;
+    const seat = seatId ? seats.get(seatId) : void 0;
+    return {
+      id: String(row.id),
+      username: String(row.username),
+      name: String(row.name),
+      role: row.role === "chair" ? "chair" : "delegate",
+      createdAt: Number(row.created_at),
+      seatId: seat ? seatId : null,
+      seatName: seat?.seatName ?? null,
+      delegationName: seat?.delegationName ?? null
+    };
+  });
 }
 async function validateRecipients(ids) {
   if (!Array.isArray(ids)) return [];
@@ -4575,8 +4985,9 @@ async function validateEventInput(body, currentTime) {
   const eventTimeRaw = Number(body.eventTime);
   const eventTime = Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 864e13 ? Math.round(eventTimeRaw) : currentTime;
   const isCrisis = body.isCrisis === true;
-  const recipientIds = await validateRecipients(body.recipientIds);
-  return { title, content, eventTime, isCrisis, recipientIds };
+  const visibility = isCrisis ? "PUBLIC" : body.visibility === "PUBLIC" ? "PUBLIC" : "SECRET";
+  const recipientIds = visibility === "SECRET" ? await validateRecipients(body.recipientIds) : [];
+  return { title, content, eventTime, isCrisis, visibility, recipientIds };
 }
 app.post("/api/auth/login", async (c) => {
   const body = await readJson(c);
@@ -4770,6 +5181,26 @@ app.patch("/api/accounts/:id", async (c) => {
   if (name) {
     await db.execute({ sql: "UPDATE accounts SET name = ? WHERE id = ?", args: [name, id] });
   }
+  if ("seatId" in body) {
+    const rawSeatId = body.seatId;
+    if (rawSeatId === null || rawSeatId === "") {
+      await db.execute({ sql: "UPDATE accounts SET seat_id = NULL WHERE id = ?", args: [id] });
+    } else if (typeof rawSeatId === "string") {
+      const meeting = await loadMeeting();
+      const seat = meeting.state.delegations.flatMap((delegation) => delegation.seats).find((item) => item.id === rawSeatId);
+      if (!seat) throw new HTTPException(404, { message: "\u5E2D\u4F4D\u4E0D\u5B58\u5728" });
+      await db.execute({
+        sql: "UPDATE accounts SET seat_id = NULL WHERE seat_id = ? AND id <> ?",
+        args: [rawSeatId, id]
+      });
+      await db.execute({
+        sql: "UPDATE accounts SET seat_id = ? WHERE id = ?",
+        args: [rawSeatId, id]
+      });
+    } else {
+      throw new HTTPException(400, { message: "\u5E2D\u4F4D\u53C2\u6570\u4E0D\u6B63\u786E" });
+    }
+  }
   if (typeof body.password === "string" && body.password.length > 0) {
     if (body.password.length < 4) {
       throw new HTTPException(400, { message: "\u5BC6\u7801\u81F3\u5C11 4 \u4E2A\u5B57\u7B26" });
@@ -4787,16 +5218,66 @@ app.delete("/api/accounts/:id", async (c) => {
   if (id === chair.id) throw new HTTPException(400, { message: "\u4E0D\u80FD\u5220\u9664\u5F53\u524D\u767B\u5F55\u8D26\u53F7" });
   const db = getDb();
   const target = await db.execute({
-    sql: "SELECT role FROM accounts WHERE id = ? LIMIT 1",
+    sql: "SELECT role, username FROM accounts WHERE id = ? LIMIT 1",
     args: [id]
   });
   if (target.rows.length === 0) throw new HTTPException(404, { message: "\u8D26\u53F7\u4E0D\u5B58\u5728" });
-  if (target.rows[0].role === "chair") {
-    throw new HTTPException(400, { message: "\u4E0D\u80FD\u5220\u9664\u4E3B\u5E2D\u8D26\u53F7" });
+  const targetRow = target.rows[0];
+  if (String(targetRow.username) === "123456") {
+    throw new HTTPException(400, { message: "\u4E0D\u80FD\u5220\u9664\u521D\u59CB\u4E3B\u5E2D\u8D26\u53F7" });
   }
   await db.execute({ sql: "DELETE FROM sessions WHERE account_id = ?", args: [id] });
   await db.execute({ sql: "DELETE FROM event_recipients WHERE account_id = ?", args: [id] });
+  await db.execute({ sql: "DELETE FROM event_reads WHERE account_id = ?", args: [id] });
   await db.execute({ sql: "DELETE FROM accounts WHERE id = ?", args: [id] });
+  return c.json({ ok: true });
+});
+app.get("/api/cron", async (c) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret && c.req.header("authorization") !== `Bearer ${secret}`) {
+    throw new HTTPException(401, { message: "unauthorized" });
+  }
+  await publishDueEvents();
+  return c.json({ ok: true, at: Date.now() });
+});
+app.post("/api/cron", async (c) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret && c.req.header("authorization") !== `Bearer ${secret}`) {
+    throw new HTTPException(401, { message: "unauthorized" });
+  }
+  await publishDueEvents();
+  return c.json({ ok: true, at: Date.now() });
+});
+app.get("/api/archives", async (c) => {
+  await requireChair(c);
+  return c.json({ archives: await listArchives() });
+});
+app.post("/api/archives", async (c) => {
+  await requireChair(c);
+  const body = await readJson(c);
+  const name = text(body.name, 80);
+  return c.json({ archive: await createArchive(name) });
+});
+app.delete("/api/archives/:id", async (c) => {
+  await requireChair(c);
+  const ok = await deleteArchive(c.req.param("id"));
+  if (!ok) throw new HTTPException(404, { message: "\u5B58\u6863\u4E0D\u5B58\u5728" });
+  return c.json({ ok: true });
+});
+app.post("/api/archives/:id/restore", async (c) => {
+  await requireChair(c);
+  try {
+    await restoreArchive(c.req.param("id"));
+  } catch (error) {
+    throw new HTTPException(400, {
+      message: error instanceof Error ? error.message : "\u5B58\u6863\u8BFB\u53D6\u5931\u8D25"
+    });
+  }
+  return c.json({ ok: true });
+});
+app.post("/api/admin/clear", async (c) => {
+  await requireChair(c);
+  await clearAllData();
   return c.json({ ok: true });
 });
 app.notFound((c) => c.json({ error: "\u63A5\u53E3\u4E0D\u5B58\u5728" }, 404));

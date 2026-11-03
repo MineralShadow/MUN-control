@@ -4,6 +4,12 @@ export type AttendanceRule = 'ALL' | 'HALF' | 'TWO_THIRDS'
 /** 表决通过要求 */
 export type MajorityRule = 'SIMPLE' | 'TWO_THIRDS' | 'UNANIMOUS'
 
+/** 计票方式：按代表团总票权 / 按代表席位票权 */
+export type VoteMode = 'DELEGATION' | 'MEMBER'
+
+/** 事件可见范围：公开给所有账号 / 秘密给选定账号 */
+export type EventVisibility = 'PUBLIC' | 'SECRET'
+
 /** 决议状态：未表决 / 通过 / 未通过 */
 export type ResolutionStatus = 'PENDING' | 'PASSED' | 'FAILED'
 
@@ -20,6 +26,8 @@ export type VoteReason =
 export interface Seat {
   id: string
   name: string
+  /** 代表计票模式下该席位的票权，整数且 >= 0 */
+  votes: number
   /** 该席位是否出席（由席位圆点手动切换） */
   present: boolean
 }
@@ -97,6 +105,7 @@ export interface ConferenceState {
   theme: string
   author: Author
   attendanceRule: AttendanceRule
+  voteMode: VoteMode
   delegations: Delegation[]
   sessions: Session[]
   currentSessionId: string | null
@@ -119,6 +128,9 @@ export interface SessionUser {
 
 export interface AccountInfo extends SessionUser {
   createdAt: number
+  seatId: string | null
+  seatName: string | null
+  delegationName: string | null
 }
 
 export interface TimeState {
@@ -148,6 +160,10 @@ export interface CouncilEvent {
   /** 事件时间（会议时间） */
   eventTime: number
   isCrisis: boolean
+  /** 公开：所有账号可见；秘密：仅 recipients 可见 */
+  visibility: EventVisibility
+  /** 当前账号是否属于该事件的展示对象（主席管理列表里也用于弹窗） */
+  inAudience: boolean
   /** null = 尚未发布（定时） */
   publishedAt: number | null
   createdAt: number
@@ -169,6 +185,12 @@ export interface SubmittedFile {
   submittedById: string
   submittedByName: string
   read: boolean
+}
+
+export interface ArchiveInfo {
+  id: string
+  name: string
+  createdAt: number
 }
 
 export interface Bootstrap {

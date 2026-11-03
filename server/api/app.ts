@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import type { Action } from '../../src/state/reducer.ts'
 import { createId } from '../../src/lib/id.ts'
-import type { AccountInfo } from '../../src/types.ts'
+import type { AccountInfo, EventVisibility } from '../../src/types.ts'
 import { hashPassword } from './password.ts'
 import {
   getSessionUser,
@@ -29,6 +29,8 @@ import {
   setFileRead,
 } from './files.ts'
 import { applyConferenceAction, loadMeeting } from './meeting.ts'
+import { createArchive, deleteArchive, listArchives, restoreArchive } from './archives.ts'
+import { clearAllData } from './admin.ts'
 import {
   clearCrisisPause,
   getTimeState,
@@ -119,6 +121,7 @@ const ALLOWED_ACTIONS = new Set([
   'theme/set',
   'author/set',
   'attendanceRule/set',
+  'voteMode/set',
   'delegation/add',
   'delegation/rename',
   'delegation/delete',
@@ -128,6 +131,7 @@ const ALLOWED_ACTIONS = new Set([
   'seat/rename',
   'seat/delete',
   'seat/togglePresent',
+  'seat/setVotes',
   'session/add',
   'session/rename',
   'session/delete',
@@ -162,17 +166,36 @@ function text(value: unknown, maxLength: number): string {
 }
 
 async function listAccounts(): Promise<AccountInfo[]> {
-  const result = await getDb().execute(
-    `SELECT id, username, name, role, created_at FROM accounts
-     ORDER BY CASE role WHEN 'chair' THEN 0 ELSE 1 END, created_at ASC`,
-  )
-  return result.rows.map((row) => ({
-    id: String(row.id),
-    username: String(row.username),
-    name: String(row.name),
-    role: row.role === 'chair' ? 'chair' : 'delegate',
-    createdAt: Number(row.created_at),
-  }))
+  const [result, meeting] = await Promise.all([
+    getDb().execute(
+      `SELECT id, username, name, role, seat_id, created_at FROM accounts
+       ORDER BY CASE role WHEN 'chair' THEN 0 ELSE 1 END, created_at ASC`,
+    ),
+    loadMeeting(),
+  ])
+  const seats = new Map<
+    string,
+    { seatName: string; delegationName: string }
+  >()
+  for (const delegation of meeting.state.delegations) {
+    for (const seat of delegation.seats) {
+      seats.set(seat.id, { seatName: seat.name, delegationName: delegation.name })
+    }
+  }
+  return result.rows.map((row) => {
+    const seatId = row.seat_id ? String(row.seat_id) : null
+    const seat = seatId ? seats.get(seatId) : undefined
+    return {
+      id: String(row.id),
+      username: String(row.username),
+      name: String(row.name),
+      role: row.role === 'chair' ? 'chair' : 'delegate',
+      createdAt: Number(row.created_at),
+      seatId: seat ? seatId : null,
+      seatName: seat?.seatName ?? null,
+      delegationName: seat?.delegationName ?? null,
+    }
+  })
 }
 
 async function validateRecipients(ids: unknown): Promise<string[]> {
@@ -202,9 +225,15 @@ async function validateEventInput(
     : currentTime
 
   const isCrisis = body.isCrisis === true
-  const recipientIds = await validateRecipients(body.recipientIds)
+  const visibility: EventVisibility = isCrisis
+    ? 'PUBLIC'
+    : body.visibility === 'PUBLIC'
+      ? 'PUBLIC'
+      : 'SECRET'
+  const recipientIds =
+    visibility === 'SECRET' ? await validateRecipients(body.recipientIds) : []
 
-  return { title, content, eventTime, isCrisis, recipientIds }
+  return { title, content, eventTime, isCrisis, visibility, recipientIds }
 }
 
 /* ---------------- 认证 ---------------- */
@@ -442,6 +471,30 @@ app.patch('/api/accounts/:id', async (c) => {
     await db.execute({ sql: 'UPDATE accounts SET name = ? WHERE id = ?', args: [name, id] })
   }
 
+  if ('seatId' in body) {
+    const rawSeatId = body.seatId
+    if (rawSeatId === null || rawSeatId === '') {
+      await db.execute({ sql: 'UPDATE accounts SET seat_id = NULL WHERE id = ?', args: [id] })
+    } else if (typeof rawSeatId === 'string') {
+      const meeting = await loadMeeting()
+      const seat = meeting.state.delegations
+        .flatMap((delegation) => delegation.seats)
+        .find((item) => item.id === rawSeatId)
+      if (!seat) throw new HTTPException(404, { message: '席位不存在' })
+      // 一个席位只绑定一个账号
+      await db.execute({
+        sql: 'UPDATE accounts SET seat_id = NULL WHERE seat_id = ? AND id <> ?',
+        args: [rawSeatId, id],
+      })
+      await db.execute({
+        sql: 'UPDATE accounts SET seat_id = ? WHERE id = ?',
+        args: [rawSeatId, id],
+      })
+    } else {
+      throw new HTTPException(400, { message: '席位参数不正确' })
+    }
+  }
+
   if (typeof body.password === 'string' && body.password.length > 0) {
     if (body.password.length < 4) {
       throw new HTTPException(400, { message: '密码至少 4 个字符' })
@@ -462,17 +515,80 @@ app.delete('/api/accounts/:id', async (c) => {
 
   const db = getDb()
   const target = await db.execute({
-    sql: 'SELECT role FROM accounts WHERE id = ? LIMIT 1',
+    sql: 'SELECT role, username FROM accounts WHERE id = ? LIMIT 1',
     args: [id],
   })
   if (target.rows.length === 0) throw new HTTPException(404, { message: '账号不存在' })
-  if (target.rows[0].role === 'chair') {
-    throw new HTTPException(400, { message: '不能删除主席账号' })
+  const targetRow = target.rows[0]
+  if (String(targetRow.username) === '123456') {
+    throw new HTTPException(400, { message: '不能删除初始主席账号' })
   }
 
   await db.execute({ sql: 'DELETE FROM sessions WHERE account_id = ?', args: [id] })
   await db.execute({ sql: 'DELETE FROM event_recipients WHERE account_id = ?', args: [id] })
+  await db.execute({ sql: 'DELETE FROM event_reads WHERE account_id = ?', args: [id] })
   await db.execute({ sql: 'DELETE FROM accounts WHERE id = ?', args: [id] })
+  return c.json({ ok: true })
+})
+
+/* ---------------- 定时发布 ---------------- */
+
+app.get('/api/cron', async (c) => {
+  const secret = process.env.CRON_SECRET
+  if (secret && c.req.header('authorization') !== `Bearer ${secret}`) {
+    throw new HTTPException(401, { message: 'unauthorized' })
+  }
+  await publishDueEvents()
+  return c.json({ ok: true, at: Date.now() })
+})
+
+app.post('/api/cron', async (c) => {
+  const secret = process.env.CRON_SECRET
+  if (secret && c.req.header('authorization') !== `Bearer ${secret}`) {
+    throw new HTTPException(401, { message: 'unauthorized' })
+  }
+  await publishDueEvents()
+  return c.json({ ok: true, at: Date.now() })
+})
+
+/* ---------------- 在线存档 ---------------- */
+
+app.get('/api/archives', async (c) => {
+  await requireChair(c)
+  return c.json({ archives: await listArchives() })
+})
+
+app.post('/api/archives', async (c) => {
+  await requireChair(c)
+  const body = await readJson(c)
+  const name = text(body.name, 80)
+  return c.json({ archive: await createArchive(name) })
+})
+
+app.delete('/api/archives/:id', async (c) => {
+  await requireChair(c)
+  const ok = await deleteArchive(c.req.param('id'))
+  if (!ok) throw new HTTPException(404, { message: '存档不存在' })
+  return c.json({ ok: true })
+})
+
+app.post('/api/archives/:id/restore', async (c) => {
+  await requireChair(c)
+  try {
+    await restoreArchive(c.req.param('id'))
+  } catch (error) {
+    throw new HTTPException(400, {
+      message: error instanceof Error ? error.message : '存档读取失败',
+    })
+  }
+  return c.json({ ok: true })
+})
+
+/* ---------------- 彻底清空 ---------------- */
+
+app.post('/api/admin/clear', async (c) => {
+  await requireChair(c)
+  await clearAllData()
   return c.json({ ok: true })
 })
 

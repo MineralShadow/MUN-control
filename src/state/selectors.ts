@@ -3,6 +3,7 @@ import {
   isDelegationPresent,
   requiredPresentSeats,
 } from '../lib/attendance'
+import { delegationTotalVotes, effectiveDelegationVotes } from '../lib/votes'
 import type {
   ConferenceState,
   Delegation,
@@ -49,10 +50,10 @@ export function getVoteStats(state: ConferenceState): VoteStats {
   for (const delegation of state.delegations) {
     totalSeats += delegation.seats.length
     presentSeats += countPresentSeats(delegation)
-    totalVotes += delegation.votes
+    totalVotes += delegationTotalVotes(delegation, state.voteMode)
     if (isDelegationPresent(delegation, state.attendanceRule)) {
       presentDelegations += 1
-      presentVotes += delegation.votes
+      presentVotes += effectiveDelegationVotes(delegation, state.voteMode)
     }
   }
 

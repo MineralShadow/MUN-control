@@ -1,0 +1,22 @@
+name: Publish due MUN events
+
+on:
+  schedule:
+    # GitHub 最短 5 分钟；不依赖 Vercel Hobby 的每日 cron 限制
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger /api/cron
+        env:
+          SITE_URL: https://mun-control.vercel.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -n "$CRON_SECRET" ]; then
+            curl -fsS -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/cron"
+          else
+            curl -fsS "$SITE_URL/api/cron"
+          fi
