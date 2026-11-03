@@ -40,12 +40,14 @@ export function SeatsPage() {
       toast('请先输入代表团名称', 'danger')
       return
     }
+    const seatId = createId('seat')
     const delegation: Delegation = {
       id: createId('dlg'),
       name: name.slice(0, 40),
       votes: 1,
       globalVeto: false,
-      seats: [{ id: createId('seat'), name: '代表 1', votes: 1, present: false }],
+      headSeatId: seatId,
+      seats: [{ id: seatId, name: '代表 1', votes: 1, present: false }],
     }
     dispatch({ type: 'delegation/add', delegation })
     setNewName('')

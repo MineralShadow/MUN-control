@@ -1,4 +1,5 @@
 import type {
+  ActiveMotion,
   AttendanceRule,
   Author,
   Ballot,
@@ -6,6 +7,7 @@ import type {
   ConferenceState,
   Delegation,
   MajorityRule,
+  MotionType,
   Resolution,
   ResolutionStatus,
   Seat,
@@ -19,6 +21,7 @@ import type {
 import { clampInt, toInt } from '../lib/format.ts'
 import { createId } from '../lib/id.ts'
 import { judgeVote } from '../lib/voting.ts'
+import { defaultMotionTypes } from '../lib/motionTypes.ts'
 import {
   DEFAULT_AUTHOR,
   DEFAULT_SETTINGS,
@@ -85,11 +88,16 @@ function normalizeDelegation(value: unknown, index: number): Delegation | null {
   if (seats.length === 0) {
     seats.push({ id: createId('seat'), name: '代表 1', votes: 1, present: false })
   }
+  const headSeatIdRaw = asText(value.headSeatId)
+  const headSeatId = seats.some((seat) => seat.id === headSeatIdRaw)
+    ? headSeatIdRaw
+    : seats[0]?.id ?? null
   return {
     id: asText(value.id) || createId('dlg'),
     name,
     votes: clampInt(toInt(value.votes, 1), 0, 999),
     globalVeto: value.globalVeto === true,
+    headSeatId,
     seats,
   }
 }
@@ -184,6 +192,46 @@ function normalizeResolution(value: unknown): Resolution | null {
   }
 }
 
+function normalizeMotionType(value: unknown, index: number): MotionType | null {
+  if (!isRecord(value)) return null
+  return {
+    id: asText(value.id) || createId('motion-type'),
+    name: asText(value.name).trim().slice(0, 40) || `动议类型 ${index + 1}`,
+    hasTopic: value.hasTopic === true,
+    hasSpeakersList: value.hasSpeakersList === true,
+    needsTotalDuration: value.needsTotalDuration === true,
+    hasUnitDuration: value.hasUnitDuration === true,
+  }
+}
+
+function normalizeActiveMotion(value: unknown): ActiveMotion | null {
+  if (!isRecord(value)) return null
+  const id = asText(value.id)
+  const typeId = asText(value.typeId)
+  if (!id || !typeId) return null
+  const rawSpeakers = Array.isArray(value.speakers) ? value.speakers : []
+  const speakers = rawSpeakers
+    .filter(isRecord)
+    .map((item) => ({
+      delegationId: asText(item.delegationId),
+      name: asText(item.name).slice(0, 40),
+    }))
+    .filter((item) => item.delegationId)
+  return {
+    id,
+    typeId,
+    typeName: asText(value.typeName).slice(0, 40),
+    proposerDelegationId: asText(value.proposerDelegationId),
+    proposerName: asText(value.proposerName).slice(0, 40),
+    topic: asText(value.topic).slice(0, 120),
+    totalSeconds: clampInt(toInt(value.totalSeconds, 0), 0, 86400),
+    unitSeconds: clampInt(toInt(value.unitSeconds, 0), 0, 86400),
+    speakers,
+    startedAt: toInt(value.startedAt, Date.now()),
+    endedAt: value.endedAt === null ? null : toInt(value.endedAt, 0) || null,
+  }
+}
+
 /**
  * 把任意来源的数据（localStorage / 导入的 JSON）整理成合法的会议状态。
  * 返回 null 表示这不是一份可识别的会议存档。
@@ -254,6 +302,12 @@ export function normalizeState(input: unknown): ConferenceState | null {
     // 只保留会期也可以，顶栏会显示“尚未选择议题”
   }
 
+  const rawMotionTypes = Array.isArray(input.motionTypes) ? input.motionTypes : []
+  const motionTypes = rawMotionTypes
+    .map((item, index) => normalizeMotionType(item, index))
+    .filter((item): item is MotionType => item !== null)
+  const finalMotionTypes = motionTypes.length > 0 ? motionTypes : defaultMotionTypes()
+
   const rawResolutions = Array.isArray(input.resolutions) ? input.resolutions : []
   const resolutions = rawResolutions
     .map(normalizeResolution)
@@ -275,6 +329,10 @@ export function normalizeState(input: unknown): ConferenceState | null {
       typeof rawSettings.skipMajorityStep === 'boolean'
         ? rawSettings.skipMajorityStep
         : DEFAULT_SETTINGS.skipMajorityStep,
+    allowPersonalFiles:
+      typeof rawSettings.allowPersonalFiles === 'boolean'
+        ? rawSettings.allowPersonalFiles
+        : DEFAULT_SETTINGS.allowPersonalFiles,
   }
 
   return {
@@ -288,6 +346,8 @@ export function normalizeState(input: unknown): ConferenceState | null {
     currentSessionId,
     currentTopicId,
     resolutions,
+    motionTypes: finalMotionTypes,
+    activeMotion: normalizeActiveMotion(input.activeMotion),
     settings,
     updatedAt: toInt(input.updatedAt, Date.now()),
   }

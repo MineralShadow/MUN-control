@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
+import { DataScopeDialog } from '../../components/DataScopeDialog'
 import { useConfirm } from '../../components/ConfirmDialog'
 import { useToast } from '../../components/Toast'
 import { apiFetch } from '../../lib/api'
 import { formatDateTime } from '../../lib/format'
 import type { ArchiveInfo } from '../../types'
+import { DATA_CATEGORIES, type DataCategoryId } from '../../lib/dataCategories'
 
 export function ArchivesManager() {
   const confirm = useConfirm()
   const toast = useToast()
   const [archives, setArchives] = useState<ArchiveInfo[]>([])
-  const [name, setName] = useState('')
+  const [scopeOpen, setScopeOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
 
@@ -26,14 +28,14 @@ export function ArchivesManager() {
     void load()
   }, [])
 
-  async function create() {
+  async function create(categories: DataCategoryId[], name?: string) {
     setLoading(true)
     try {
       const data = await apiFetch<{ archive: ArchiveInfo }>('/archives', {
         method: 'POST',
-        json: { name: name.trim() },
+        json: { name: name?.trim() ?? '', include: categories },
       })
-      setName('')
+      setScopeOpen(false)
       await load()
       toast(`已创建存档：${data.archive.name}`, 'success')
     } catch (error) {
@@ -43,11 +45,16 @@ export function ArchivesManager() {
     }
   }
 
+  function categoryLabels(archive: ArchiveInfo): string {
+    const labels = new Map(DATA_CATEGORIES.map((item) => [item.id, item.label]))
+    return archive.included.map((id) => labels.get(id) ?? id).join('、')
+  }
+
   async function restore(archive: ArchiveInfo) {
     const ok = await confirm({
       title: `读取存档「${archive.name}」？`,
       message:
-        '会用存档覆盖当前会场名称、席位、会期、决议、时间、账号、事件、文件与已读状态。当前登录会失效，请用存档里的账号重新登录。',
+        `只恢复存档中包含的类别：${categoryLabels(archive)}。未包含的类别保留当前内容；当前登录会失效，请用存档里的账号重新登录。`,
       confirmText: '读取并覆盖',
       danger: true,
     })
@@ -95,17 +102,10 @@ export function ArchivesManager() {
       </div>
 
       <div className="archive-create">
-        <input
-          className="input"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="存档名称（可留空，自动使用会场名 + 时间）"
-          maxLength={80}
-          aria-label="存档名称"
-        />
-        <button type="button" className="btn btn-primary" disabled={loading} onClick={() => void create()}>
-          {loading ? '保存中…' : '＋ 存档当前会场'}
+        <button type="button" className="btn btn-primary" disabled={loading} onClick={() => setScopeOpen(true)}>
+          ＋ 存档当前会场
         </button>
+        <span className="hint">存档前会选择要保存的内容类别。</span>
       </div>
 
       {archives.length === 0 ? (
@@ -116,7 +116,7 @@ export function ArchivesManager() {
             <div className="archive-row" key={archive.id}>
               <div className="archive-info">
                 <strong>{archive.name}</strong>
-                <span>{formatDateTime(archive.createdAt)}</span>
+                <span>{formatDateTime(archive.createdAt)} · {categoryLabels(archive)}</span>
               </div>
               <div className="archive-actions">
                 <button
@@ -141,7 +141,14 @@ export function ArchivesManager() {
           ))}
         </div>
       )}
-      <p className="hint">读取存档会让当前登录失效，这是为了保证账号密码与会场数据完全回到存档时刻。</p>
+      <p className="hint">读取存档会让当前登录失效；只恢复存档中实际包含的类别。</p>
+      <DataScopeDialog
+        open={scopeOpen}
+        mode="archive"
+        busy={loading}
+        onClose={() => setScopeOpen(false)}
+        onConfirm={(categories, name) => void create(categories, name)}
+      />
     </section>
   )
 }

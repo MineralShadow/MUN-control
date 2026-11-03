@@ -6,6 +6,7 @@ import type {
 } from '../../src/types.ts'
 import { createId } from '../../src/lib/id.ts'
 import { getDb } from './db.ts'
+import { sendEventPush } from './push.ts'
 import {
   clearCrisisPause,
   getCurrentTime,
@@ -23,6 +24,7 @@ export interface EventInput {
 
 interface EventRow {
   id: string
+  conference_id: string
   title: string
   content: string
   event_time: number
@@ -36,6 +38,7 @@ interface EventRow {
 function toEventRow(row: Record<string, unknown>): EventRow {
   return {
     id: String(row.id),
+    conference_id: String(row.conference_id),
     title: String(row.title),
     content: String(row.content),
     event_time: Number(row.event_time),
@@ -47,13 +50,13 @@ function toEventRow(row: Record<string, unknown>): EventRow {
   }
 }
 
-/** 把到达事件时间的定时事件发布出去；危机事件会暂停时间 */
-export async function publishDueEvents(): Promise<void> {
+/** 发布某个会场到点的事件；危机事件会暂停该会场时间 */
+export async function publishDueEvents(conferenceId: string): Promise<void> {
   const db = getDb()
-  const now = await getCurrentTime()
+  const now = await getCurrentTime(conferenceId)
   const due = await db.execute({
-    sql: 'SELECT id, is_crisis FROM events WHERE published_at IS NULL AND event_time <= ?',
-    args: [now],
+    sql: 'SELECT id, is_crisis FROM events WHERE conference_id = ? AND published_at IS NULL AND event_time <= ?',
+    args: [conferenceId, now],
   })
 
   for (const row of due.rows) {
@@ -62,9 +65,19 @@ export async function publishDueEvents(): Promise<void> {
       sql: 'UPDATE events SET published_at = ? WHERE id = ? AND published_at IS NULL',
       args: [Date.now(), eventId],
     })
-    if (updated.rowsAffected > 0 && Number(row.is_crisis) === 1) {
-      await pauseForCrisis(eventId)
+    if (updated.rowsAffected > 0) {
+      if (Number(row.is_crisis) === 1) {
+        await pauseForCrisis(conferenceId, eventId)
+      }
+      await sendEventPush(conferenceId, eventId)
     }
+  }
+}
+
+export async function publishAllDueEvents(): Promise<void> {
+  const result = await getDb().execute('SELECT id FROM conferences ORDER BY created_at ASC')
+  for (const row of result.rows) {
+    await publishDueEvents(String(row.id))
   }
 }
 
@@ -95,8 +108,11 @@ async function getMyRead(eventId: string, accountId: string): Promise<boolean> {
   return Number(result.rows[0]?.read ?? 0) === 1
 }
 
-async function countAccounts(): Promise<number> {
-  const result = await getDb().execute('SELECT COUNT(*) AS n FROM accounts')
+async function countAccounts(conferenceId: string): Promise<number> {
+  const result = await getDb().execute({
+    sql: 'SELECT COUNT(*) AS n FROM conference_members WHERE conference_id = ?',
+    args: [conferenceId],
+  })
   return Number(result.rows[0]?.n ?? 0)
 }
 
@@ -132,11 +148,15 @@ function baseEvent(
   }
 }
 
-export async function listEventsForChair(user: SessionUser): Promise<CouncilEvent[]> {
-  const result = await getDb().execute(
-    'SELECT * FROM events ORDER BY event_time DESC, created_at DESC',
-  )
-  const totalAccounts = await countAccounts()
+export async function listEventsForChair(
+  user: SessionUser,
+  conferenceId: string,
+): Promise<CouncilEvent[]> {
+  const result = await getDb().execute({
+    sql: 'SELECT * FROM events WHERE conference_id = ? ORDER BY event_time DESC, created_at DESC',
+    args: [conferenceId],
+  })
+  const totalAccounts = await countAccounts(conferenceId)
   const events: CouncilEvent[] = []
   for (const raw of result.rows) {
     const row = toEventRow(raw)
@@ -159,13 +179,16 @@ export async function listEventsForChair(user: SessionUser): Promise<CouncilEven
   return events
 }
 
-export async function listEventsForDelegate(user: SessionUser): Promise<CouncilEvent[]> {
+export async function listEventsForDelegate(
+  user: SessionUser,
+  conferenceId: string,
+): Promise<CouncilEvent[]> {
   const result = await getDb().execute({
     sql: `SELECT e.*, COALESCE(er.read, 0) AS my_read
           FROM events e
           LEFT JOIN event_reads er
             ON er.event_id = e.id AND er.account_id = ?
-          WHERE e.published_at IS NOT NULL
+          WHERE e.conference_id = ? AND e.published_at IS NOT NULL
             AND (
               e.visibility = 'PUBLIC'
               OR EXISTS (
@@ -174,7 +197,7 @@ export async function listEventsForDelegate(user: SessionUser): Promise<CouncilE
               )
             )
           ORDER BY e.event_time DESC, e.created_at DESC`,
-    args: [user.id, user.id],
+    args: [user.id, conferenceId, user.id],
   })
 
   return result.rows.map((raw) => {
@@ -192,8 +215,8 @@ export async function listEventsForDelegate(user: SessionUser): Promise<CouncilE
 
 export async function listEvents(user: SessionUser): Promise<CouncilEvent[]> {
   return user.role === 'chair'
-    ? listEventsForChair(user)
-    : listEventsForDelegate(user)
+    ? listEventsForChair(user, user.conferenceId)
+    : listEventsForDelegate(user, user.conferenceId)
 }
 
 export async function getEventForChair(
@@ -201,8 +224,8 @@ export async function getEventForChair(
   eventId: string,
 ): Promise<CouncilEvent | null> {
   const result = await getDb().execute({
-    sql: 'SELECT * FROM events WHERE id = ? LIMIT 1',
-    args: [eventId],
+    sql: 'SELECT * FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
   })
   const raw = result.rows[0]
   if (!raw) return null
@@ -214,7 +237,7 @@ export async function getEventForChair(
   const readCount = publicEvent
     ? await countReads(row.id)
     : recipients.filter((item) => item.read).length
-  const totalAccounts = publicEvent ? await countAccounts() : recipients.length
+  const totalAccounts = publicEvent ? await countAccounts(user.conferenceId) : recipients.length
   return {
     ...baseEvent(row),
     recipients,
@@ -249,10 +272,11 @@ export async function createEvent(
   const visibility: EventVisibility = input.isCrisis ? 'PUBLIC' : input.visibility
   await db.execute({
     sql: `INSERT INTO events
-          (id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          (id, conference_id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     args: [
       id,
+      user.conferenceId,
       input.title,
       input.content,
       input.eventTime,
@@ -265,18 +289,19 @@ export async function createEvent(
   if (visibility === 'SECRET') {
     await replaceRecipients(id, input.recipientIds)
   }
-  await publishDueEvents()
+  await publishDueEvents(user.conferenceId)
   return id
 }
 
 export async function updateEvent(
   eventId: string,
+  user: SessionUser,
   input: EventInput,
 ): Promise<boolean> {
   const db = getDb()
   const existing = await db.execute({
-    sql: 'SELECT * FROM events WHERE id = ? LIMIT 1',
-    args: [eventId],
+    sql: 'SELECT * FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
   })
   const raw = existing.rows[0]
   if (!raw) return false
@@ -286,7 +311,7 @@ export async function updateEvent(
   await db.execute({
     sql: `UPDATE events SET title = ?, content = ?, event_time = ?, is_crisis = ?,
             visibility = ?
-          WHERE id = ?`,
+          WHERE id = ? AND conference_id = ?`,
     args: [
       input.title,
       input.content,
@@ -294,6 +319,7 @@ export async function updateEvent(
       input.isCrisis ? 1 : 0,
       visibility,
       eventId,
+      user.conferenceId,
     ],
   })
   if (visibility === 'SECRET') {
@@ -303,27 +329,30 @@ export async function updateEvent(
   }
 
   if (row.published_at && !input.isCrisis) {
-    await clearCrisisPause(eventId)
+    await clearCrisisPause(user.conferenceId, eventId)
   }
   if (row.published_at && input.isCrisis) {
-    await pauseForCrisis(eventId)
+    await pauseForCrisis(user.conferenceId, eventId)
   }
 
-  await publishDueEvents()
+  await publishDueEvents(user.conferenceId)
   return true
 }
 
-export async function deleteEvent(eventId: string): Promise<boolean> {
+export async function deleteEvent(
+  eventId: string,
+  user: SessionUser,
+): Promise<boolean> {
   const db = getDb()
   const existing = await db.execute({
-    sql: 'SELECT id FROM events WHERE id = ? LIMIT 1',
-    args: [eventId],
+    sql: 'SELECT id FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
   })
   if (existing.rows.length === 0) return false
   await db.execute({ sql: 'DELETE FROM event_recipients WHERE event_id = ?', args: [eventId] })
   await db.execute({ sql: 'DELETE FROM event_reads WHERE event_id = ?', args: [eventId] })
   await db.execute({ sql: 'DELETE FROM events WHERE id = ?', args: [eventId] })
-  await clearCrisisPause(eventId)
+  await clearCrisisPause(user.conferenceId, eventId)
   return true
 }
 
@@ -334,8 +363,8 @@ export async function setEventRead(
 ): Promise<boolean> {
   const db = getDb()
   const result = await db.execute({
-    sql: 'SELECT visibility, published_at FROM events WHERE id = ? LIMIT 1',
-    args: [eventId],
+    sql: 'SELECT visibility, published_at FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
   })
   const row = result.rows[0]
   if (!row || row.published_at === null) return false

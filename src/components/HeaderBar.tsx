@@ -6,7 +6,7 @@ import { useConfirm } from './ConfirmDialog'
 import { ServerClock } from './ServerClock'
 
 export function HeaderBar({ route }: { route: RoutePath }) {
-  const { state, me, time, logout } = useConference()
+  const { state, me, time, conferences, switchToConference, logout } = useConference()
   const confirm = useConfirm()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -55,6 +55,22 @@ export function HeaderBar({ route }: { route: RoutePath }) {
         </div>
 
         <div className="header-tools">
+          {conferences.length > 1 ? (
+            <label className="conference-switcher">
+              <span>会场</span>
+              <select
+                value={me.conferenceId}
+                onChange={(event) => void switchToConference(event.target.value)}
+                aria-label="切换会场"
+              >
+                {conferences.map((conference) => (
+                  <option key={conference.id} value={conference.id}>
+                    {conference.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <ServerClock time={time} />
           <div className="user-chip">
             <span className="user-name">{me.name}</span>

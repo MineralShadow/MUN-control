@@ -39,6 +39,8 @@ export interface Delegation {
   votes: number
   /** 全局一票否决权 */
   globalVeto: boolean
+  /** 阁首席位；只有阁首可以以代表团身份上传文件 */
+  headSeatId: string | null
   seats: Seat[]
 }
 
@@ -57,6 +59,38 @@ export interface Settings {
   defaultMajority: MajorityRule
   skipVetoStep: boolean
   skipMajorityStep: boolean
+  /** 是否允许普通代表上传个人文件；关闭时只有阁首可上传代表团文件 */
+  allowPersonalFiles: boolean
+}
+
+export type FileScope = 'PERSONAL' | 'DELEGATION'
+
+export interface MotionType {
+  id: string
+  name: string
+  hasTopic: boolean
+  hasSpeakersList: boolean
+  needsTotalDuration: boolean
+  hasUnitDuration: boolean
+}
+
+export interface MotionSpeaker {
+  delegationId: string
+  name: string
+}
+
+export interface ActiveMotion {
+  id: string
+  typeId: string
+  typeName: string
+  proposerDelegationId: string
+  proposerName: string
+  topic: string
+  totalSeconds: number
+  unitSeconds: number
+  speakers: MotionSpeaker[]
+  startedAt: number
+  endedAt: number | null
 }
 
 export interface Author {
@@ -111,6 +145,8 @@ export interface ConferenceState {
   currentSessionId: string | null
   currentTopicId: string | null
   resolutions: Resolution[]
+  motionTypes: MotionType[]
+  activeMotion: ActiveMotion | null
   settings: Settings
   updatedAt: number
 }
@@ -119,14 +155,32 @@ export interface ConferenceState {
 
 export type Role = 'chair' | 'delegate'
 
+export interface ConferenceSummary {
+  id: string
+  name: string
+  role: Role
+}
+
 export interface SessionUser {
   id: string
   username: string
   name: string
   role: Role
+  conferenceId: string
+  conferenceName: string
 }
 
-export interface AccountInfo extends SessionUser {
+export interface DataCategory {
+  id: 'info' | 'seats' | 'sessions' | 'motions' | 'time' | 'events' | 'files' | 'accounts'
+  label: string
+  description: string
+}
+
+export interface AccountInfo {
+  id: string
+  username: string
+  name: string
+  role: Role
   createdAt: number
   seatId: string | null
   seatName: string | null
@@ -181,6 +235,11 @@ export interface SubmittedFile {
   filename: string
   mime: string
   size: number
+  fileType: string
+  scope: FileScope
+  delegationId: string | null
+  delegationName: string | null
+  coSign: boolean
   submittedAt: number
   submittedById: string
   submittedByName: string
@@ -191,6 +250,14 @@ export interface ArchiveInfo {
   id: string
   name: string
   createdAt: number
+  included: DataCategory['id'][]
+}
+
+export interface MyMembership {
+  seatId: string
+  delegationId: string
+  delegationName: string
+  isHead: boolean
 }
 
 export interface Bootstrap {
@@ -200,6 +267,8 @@ export interface Bootstrap {
   events: CouncilEvent[]
   files: SubmittedFile[]
   accounts: AccountInfo[]
+  conferences: ConferenceSummary[]
+  myMembership: MyMembership | null
   revision: number
   serverNow: number
 }

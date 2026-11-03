@@ -10,11 +10,11 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "node --experimental-strip-types server/dev.ts",
-    "build": "pnpm build:api && pnpm build:cron && tsc --noEmit && vite build",
+    "build": "npm run build:api && npm run build:cron && tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "build:api": "esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/index.js --log-level=warning",
-    "build:cron": "esbuild server/cron-handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/cron.js --log-level=warning"
+    "build:api": "esbuild server/vercel-handler.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js --log-level=warning",
+    "build:cron": "esbuild server/cron-handler.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/cron.js --log-level=warning"
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",
@@ -22,12 +22,14 @@
     "@tursodatabase/serverless": "1.4.1",
     "hono": "4.13.16",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "3.6.4",
     "@vitejs/plugin-react": "6.2.1",
     "esbuild": "0.28.2",
     "typescript": "~5.9.3",

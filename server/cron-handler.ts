@@ -1,5 +1,5 @@
 import { ensureDb } from './api/db.ts'
-import { publishDueEvents } from './api/events.ts'
+import { publishAllDueEvents } from './api/events.ts'
 
 /**
  * 由 GitHub Actions（或 Pro 计划的 Vercel Cron）定时调用。
@@ -14,7 +14,7 @@ const handler = async (request: Request) => {
     }
   }
   await ensureDb()
-  await publishDueEvents()
+  await publishAllDueEvents()
   return Response.json({ ok: true, at: Date.now() })
 }
 

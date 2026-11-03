@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { showEventNotification } from '../lib/notifications'
+import { pushEnabledLocally } from '../lib/push'
 import { useConference } from '../state/ConferenceContext'
 
 /**
@@ -12,6 +13,8 @@ export function EventNotifier() {
   const initializedFor = useRef<string | null>(null)
 
   useEffect(() => {
+    // Web Push 已订阅时由 Service Worker 负责系统通知，避免重复弹两次
+    if (pushEnabledLocally()) return
     if (initializedFor.current !== me.id) {
       initializedFor.current = me.id
       seen.current = new Set()

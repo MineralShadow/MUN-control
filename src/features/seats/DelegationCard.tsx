@@ -116,6 +116,12 @@ export function DelegationCard({ delegation, rule, voteMode }: DelegationCardPro
           ·
         </span>
         <span className="meta-votes">{effectiveVotes} 票{voteMode === 'MEMBER' ? `（合计 ${totalVotes}）` : ''}</span>
+        <span className="meta-sep" aria-hidden="true">
+          ·
+        </span>
+        <span>
+          阁首：{delegation.seats.find((seat) => seat.id === delegation.headSeatId)?.name ?? '未设置'}
+        </span>
       </div>
 
       <div className={`delegation-controls${canEdit ? '' : ' is-readonly'}`}>
@@ -169,6 +175,10 @@ export function DelegationCard({ delegation, rule, voteMode }: DelegationCardPro
             index={index}
             canDelete={delegation.seats.length > 1}
             voteMode={voteMode}
+            isHead={delegation.headSeatId === seat.id}
+            onSetHead={() =>
+              dispatch({ type: 'delegation/setHead', id: delegation.id, seatId: seat.id })
+            }
           />
         ))}
       </ul>

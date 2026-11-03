@@ -13,9 +13,12 @@ export interface TimeRow {
 
 const DEFAULT_RATE = 1
 
-async function loadRow(): Promise<TimeRow> {
+async function loadRow(conferenceId: string): Promise<TimeRow> {
   const db = getDb()
-  const result = await db.execute('SELECT * FROM time_state WHERE id = 1 LIMIT 1')
+  const result = await db.execute({
+    sql: 'SELECT * FROM conference_time WHERE conference_id = ? LIMIT 1',
+    args: [conferenceId],
+  })
   const row = result.rows[0]
   if (row) {
     return {
@@ -31,10 +34,10 @@ async function loadRow(): Promise<TimeRow> {
 
   const now = Date.now()
   await db.execute({
-    sql: `INSERT OR IGNORE INTO time_state
-          (id, now_ms, rate, running, anchor_ms, crisis_paused, crisis_event_id, updated_at)
-          VALUES (1, ?, ?, 0, ?, 0, NULL, ?)`,
-    args: [now, DEFAULT_RATE, now, now],
+    sql: `INSERT OR IGNORE INTO conference_time
+          (conference_id, now_ms, rate, running, anchor_ms, crisis_paused, crisis_event_id, updated_at)
+          VALUES (?, ?, ?, 0, ?, 0, NULL, ?)`,
+    args: [conferenceId, now, DEFAULT_RATE, now, now],
   })
   return {
     now_ms: now,
@@ -52,12 +55,12 @@ function currentFromRow(row: TimeRow, at = Date.now()): number {
   return row.now_ms + Math.max(0, at - row.anchor_ms) * row.rate
 }
 
-async function saveRow(row: TimeRow): Promise<void> {
+async function saveRow(conferenceId: string, row: TimeRow): Promise<void> {
   await getDb().execute({
-    sql: `UPDATE time_state SET
+    sql: `UPDATE conference_time SET
             now_ms = ?, rate = ?, running = ?, anchor_ms = ?,
             crisis_paused = ?, crisis_event_id = ?, updated_at = ?
-          WHERE id = 1`,
+          WHERE conference_id = ?`,
     args: [
       Math.round(row.now_ms),
       row.rate,
@@ -66,12 +69,13 @@ async function saveRow(row: TimeRow): Promise<void> {
       row.crisis_paused,
       row.crisis_event_id,
       row.updated_at,
+      conferenceId,
     ],
   })
 }
 
-export async function getTimeState(): Promise<TimeState> {
-  const row = await loadRow()
+export async function getTimeState(conferenceId: string): Promise<TimeState> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
   return {
     nowMs: row.now_ms,
@@ -84,15 +88,15 @@ export async function getTimeState(): Promise<TimeState> {
   }
 }
 
-export async function getCurrentTime(): Promise<number> {
-  const row = await loadRow()
+export async function getCurrentTime(conferenceId: string): Promise<number> {
+  const row = await loadRow(conferenceId)
   return Math.round(currentFromRow(row))
 }
 
-export async function setCurrentTime(ms: number): Promise<void> {
-  const row = await loadRow()
+export async function setCurrentTime(conferenceId: string, ms: number): Promise<void> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
-  await saveRow({
+  await saveRow(conferenceId, {
     ...row,
     now_ms: Math.round(ms),
     anchor_ms: at,
@@ -100,10 +104,10 @@ export async function setCurrentTime(ms: number): Promise<void> {
   })
 }
 
-export async function startTimeFlow(): Promise<void> {
-  const row = await loadRow()
+export async function startTimeFlow(conferenceId: string): Promise<void> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
-  await saveRow({
+  await saveRow(conferenceId, {
     ...row,
     now_ms: Math.round(currentFromRow(row, at)),
     anchor_ms: at,
@@ -112,10 +116,10 @@ export async function startTimeFlow(): Promise<void> {
   })
 }
 
-export async function pauseTimeFlow(): Promise<void> {
-  const row = await loadRow()
+export async function pauseTimeFlow(conferenceId: string): Promise<void> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
-  await saveRow({
+  await saveRow(conferenceId, {
     ...row,
     now_ms: Math.round(currentFromRow(row, at)),
     anchor_ms: at,
@@ -124,10 +128,10 @@ export async function pauseTimeFlow(): Promise<void> {
   })
 }
 
-export async function setTimeRate(rate: number): Promise<void> {
-  const row = await loadRow()
+export async function setTimeRate(conferenceId: string, rate: number): Promise<void> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
-  await saveRow({
+  await saveRow(conferenceId, {
     ...row,
     now_ms: Math.round(currentFromRow(row, at)),
     anchor_ms: at,
@@ -136,11 +140,10 @@ export async function setTimeRate(rate: number): Promise<void> {
   })
 }
 
-/** 危机事件发布时调用：时间停在当前值，并标记危机暂停 */
-export async function pauseForCrisis(eventId: string): Promise<void> {
-  const row = await loadRow()
+export async function pauseForCrisis(conferenceId: string, eventId: string): Promise<void> {
+  const row = await loadRow(conferenceId)
   const at = Date.now()
-  await saveRow({
+  await saveRow(conferenceId, {
     ...row,
     now_ms: Math.round(currentFromRow(row, at)),
     anchor_ms: at,
@@ -151,16 +154,16 @@ export async function pauseForCrisis(eventId: string): Promise<void> {
   })
 }
 
-/** 解除危机暂停；若传入 eventId，则只解除该事件造成的暂停 */
-export async function clearCrisisPause(eventId?: string): Promise<boolean> {
-  const row = await loadRow()
-  if (row.crisis_paused !== 1) return false
-  if (eventId && row.crisis_event_id && row.crisis_event_id !== eventId) return false
-  await saveRow({
+export async function clearCrisisPause(conferenceId: string, eventId?: string): Promise<void> {
+  const row = await loadRow(conferenceId)
+  if (eventId && row.crisis_event_id && row.crisis_event_id !== eventId) return
+  const at = Date.now()
+  await saveRow(conferenceId, {
     ...row,
+    now_ms: Math.round(currentFromRow(row, at)),
+    anchor_ms: at,
     crisis_paused: 0,
     crisis_event_id: null,
-    updated_at: Date.now(),
+    updated_at: at,
   })
-  return true
 }

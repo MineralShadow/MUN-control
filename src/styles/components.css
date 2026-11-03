@@ -1140,3 +1140,378 @@
     flex: 1;
   }
 }
+
+/* ---------- 数据类别选择 / 会场切换 ---------- */
+
+.danger-notice {
+  border-color: rgba(178, 59, 59, 0.25);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.scope-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf9;
+  cursor: pointer;
+}
+
+.scope-row.checked {
+  border-color: rgba(47, 125, 92, 0.28);
+  background: var(--green-soft);
+}
+
+.scope-row input {
+  margin-top: 3px;
+}
+
+.scope-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scope-row strong {
+  font-size: 13px;
+}
+
+.scope-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scope-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.conference-switcher {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.conference-switcher select {
+  max-width: 155px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: #fffdf9;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.conference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.conference-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf9;
+}
+
+.conference-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conference-copy strong {
+  font-size: 13px;
+}
+
+.conference-copy span {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.conference-create {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.conference-create .input {
+  flex: 1;
+}
+
+@media (max-width: 760px) {
+  .conference-create {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .conference-switcher select {
+    max-width: 110px;
+  }
+}
+
+/* ---------- 文件权限 / 阁首 ---------- */
+
+.file-permission-bar {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+}
+
+.file-permission-bar strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.file-permission-bar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.file-cosign {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.seat-head-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seat-head-btn:hover:not(:disabled),
+.seat-head-btn.active {
+  border-color: rgba(176, 141, 87, 0.35);
+  background: var(--gold-soft);
+  color: #8a6a3a;
+}
+
+.seat-head-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.seat-head-badge {
+  flex: none;
+}
+
+/* ---------- 会议主持 ---------- */
+
+.motion-live {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+  justify-content: space-between;
+  padding: 22px 26px;
+  border: 1px solid rgba(176, 141, 87, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fbf4e7, #fffdf9);
+}
+
+.motion-live.ended {
+  opacity: 0.8;
+}
+
+.motion-live-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.motion-live h2 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.motion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.motion-speakers {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.motion-speakers > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.motion-speaker {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.motion-clock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 170px;
+  text-align: right;
+}
+
+.motion-time {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.motion-clock-note {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.motion-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.motion-start {
+  justify-self: start;
+}
+
+.motion-speaker-picker {
+  margin-top: 16px;
+}
+
+.motion-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.motion-type-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+}
+
+.motion-type-card.active {
+  border-color: rgba(176, 141, 87, 0.55);
+  box-shadow: 0 0 0 1px rgba(176, 141, 87, 0.15);
+}
+
+.motion-type-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.motion-type-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.motion-attr-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.motion-attr-grid label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.motion-type-add {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.motion-type-add .input {
+  flex: 1;
+  max-width: 320px;
+}
+
+@media (max-width: 960px) {
+  .motion-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .motion-attr-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .file-permission-bar,
+  .motion-live {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .motion-clock {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .motion-form,
+  .motion-attr-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .motion-type-add {
+    flex-direction: column;
+  }
+}

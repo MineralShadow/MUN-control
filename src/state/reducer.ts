@@ -1,7 +1,9 @@
 import type {
+  ActiveMotion,
   Author,
   ConferenceState,
   Delegation,
+  MotionType,
   Resolution,
   Seat,
   Session,
@@ -22,6 +24,7 @@ export type Action =
   | { type: 'delegation/rename'; id: string; name: string }
   | { type: 'delegation/delete'; id: string }
   | { type: 'delegation/setVotes'; id: string; votes: number }
+  | { type: 'delegation/setHead'; id: string; seatId: string }
   | { type: 'delegation/toggleVeto'; id: string }
   | { type: 'seat/add'; delegationId: string; seat: Seat }
   | { type: 'seat/rename'; delegationId: string; seatId: string; name: string }
@@ -40,6 +43,11 @@ export type Action =
   | { type: 'resolution/rename'; id: string; title: string }
   | { type: 'resolution/delete'; id: string }
   | { type: 'resolution/finish'; id: string; result: VoteResult }
+  | { type: 'motionType/add'; motionType: MotionType }
+  | { type: 'motionType/update'; motionType: MotionType }
+  | { type: 'motionType/delete'; id: string }
+  | { type: 'motion/start'; motion: ActiveMotion }
+  | { type: 'motion/end'; endedAt: number }
   | { type: 'settings/patch'; patch: Partial<Settings> }
   | { type: 'state/replace'; state: ConferenceState }
   | { type: 'state/reset' }
@@ -122,6 +130,14 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
       )
     }
 
+    case 'delegation/setHead':
+      return mapDelegation(state, action.id, (delegation) => ({
+        ...delegation,
+        headSeatId: delegation.seats.some((seat) => seat.id === action.seatId)
+          ? action.seatId
+          : delegation.headSeatId,
+      }))
+
     case 'delegation/toggleVeto':
       return mapDelegation(state, action.id, (delegation) => ({
         ...delegation,
@@ -152,9 +168,14 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
     case 'seat/delete':
       return mapDelegation(state, action.delegationId, (delegation) => {
         if (delegation.seats.length <= 1) return delegation
+        const seats = delegation.seats.filter((seat) => seat.id !== action.seatId)
         return {
           ...delegation,
-          seats: delegation.seats.filter((seat) => seat.id !== action.seatId),
+          seats,
+          headSeatId:
+            delegation.headSeatId === action.seatId
+              ? seats[0]?.id ?? null
+              : delegation.headSeatId,
         }
       })
 
@@ -316,6 +337,31 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
             : resolution,
         ),
       }
+
+    case 'motionType/add':
+      return { ...state, motionTypes: [...state.motionTypes, action.motionType] }
+
+    case 'motionType/update':
+      return {
+        ...state,
+        motionTypes: state.motionTypes.map((item) =>
+          item.id === action.motionType.id ? action.motionType : item,
+        ),
+      }
+
+    case 'motionType/delete':
+      return {
+        ...state,
+        motionTypes: state.motionTypes.filter((item) => item.id !== action.id),
+      }
+
+    case 'motion/start':
+      return { ...state, activeMotion: action.motion }
+
+    case 'motion/end':
+      return state.activeMotion
+        ? { ...state, activeMotion: { ...state.activeMotion, endedAt: action.endedAt } }
+        : state
 
     case 'settings/patch':
       return { ...state, settings: { ...state.settings, ...action.patch } }

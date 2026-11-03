@@ -6,13 +6,21 @@ import { useConfirm } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
 import { AccountsManager } from '../features/settings/AccountsManager'
 import { ArchivesManager } from '../features/settings/ArchivesManager'
+import { ConferenceManager } from '../features/settings/ConferenceManager'
+import { DataScopeDialog } from '../components/DataScopeDialog'
+import type { DataCategoryId } from '../lib/dataCategories'
 import { formatDateTime } from '../lib/format'
 import { apiFetch } from '../lib/api'
 import {
   notificationPermission,
-  requestNotificationPermission,
   type NotificationPermissionState,
 } from '../lib/notifications'
+import {
+  disablePush,
+  enablePush,
+  pushEnabledLocally,
+  pushSupported,
+} from '../lib/push'
 import { MAJORITY_OPTIONS, majorityLabel } from '../lib/voting'
 import { useConference } from '../state/ConferenceContext'
 import { exportStateFile, importStateFile } from '../state/storage'
@@ -24,7 +32,9 @@ export function SettingsPage() {
   const [permission, setPermission] = useState<NotificationPermissionState>(() =>
     notificationPermission(),
   )
+  const [pushOn, setPushOn] = useState(() => pushEnabledLocally())
   const [archiveKey, setArchiveKey] = useState(0)
+  const [clearOpen, setClearOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canEdit = me.role === 'chair'
 
@@ -57,21 +67,14 @@ export function SettingsPage() {
     }
   }
 
-  async function handleReset() {
+  async function performClear(categories: DataCategoryId[]) {
     if (!canEdit) return
-    const ok = await confirm({
-      title: '彻底清空会场数据？',
-      message:
-        '会场名称、席位、会期、议题、决议、设置、会议时间、事件、文件、线上存档与所有代表账号都会删除；主席账号会保留。此操作不可撤销。',
-      confirmText: '彻底清空',
-      danger: true,
-    })
-    if (!ok) return
     try {
-      await apiFetch('/admin/clear', { method: 'POST' })
+      await apiFetch('/admin/clear', { method: 'POST', json: { include: categories } })
       await refresh()
       setArchiveKey((value) => value + 1)
-      toast('会场数据已彻底清空', 'success')
+      setClearOpen(false)
+      toast('已清除所选会场数据', 'success')
     } catch (error) {
       toast(error instanceof Error ? error.message : '清空失败', 'danger')
     }
@@ -88,6 +91,8 @@ export function SettingsPage() {
             : '这里展示会场默认设置。只有主席可以修改设置、账号与数据。'
         }
       />
+
+      <ConferenceManager />
 
       <section className="settings-card">
         <div className="settings-card-head">
@@ -194,11 +199,11 @@ export function SettingsPage() {
 
           <div className="setting-row setting-row-danger">
             <div className="setting-copy">
-              <h3>彻底清空会场数据</h3>
-              <p>删除会场名称、时间、事件、文件、存档与代表账号；保留主席账号。</p>
+              <h3>清除当前会场数据</h3>
+              <p>清除前可选择类别；只影响当前会场，线上存档保留。</p>
             </div>
-            <button type="button" className="btn btn-danger" onClick={handleReset}>
-              清空
+            <button type="button" className="btn btn-danger" onClick={() => setClearOpen(true)}>
+              选择清除
             </button>
           </div>
 
@@ -239,30 +244,45 @@ export function SettingsPage() {
           <div className="setting-copy">
             <h3>浏览器通知</h3>
             <p>
-              授权后，页面在后台标签页时收到公开或发给你的秘密事件，会弹出系统通知。
-              浏览器完全关闭时不保证送达；要彻底离线推送需要 Web Push。
+              通过 Web Push 订阅后，即使网页完全关闭，公开事件或发给你的秘密事件也会在电脑右下角弹出系统通知。
+              需要 HTTPS；iOS 需先把网站添加到主屏幕。
             </p>
           </div>
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={permission === 'granted' || permission === 'unsupported'}
+            disabled={!pushSupported() && permission !== 'denied'}
             onClick={() => {
-              void requestNotificationPermission().then((next) => {
-                setPermission(next)
-                if (next === 'granted') toast('已启用浏览器通知', 'success')
-                else if (next === 'denied') toast('通知权限被拒绝，可在浏览器设置中恢复', 'danger')
-                else if (next === 'unsupported') toast('当前浏览器不支持通知', 'danger')
+              if (pushOn) {
+                void disablePush().then(() => {
+                  setPushOn(false)
+                  setPermission(notificationPermission())
+                  toast('已关闭桌面推送', 'success')
+                })
+                return
+              }
+              void enablePush().then((result) => {
+                setPermission(notificationPermission())
+                if (result === 'granted') {
+                  setPushOn(true)
+                  toast('已启用桌面推送：关闭网页也能收到事件通知', 'success')
+                } else if (result === 'denied') {
+                  toast('通知权限被拒绝，可在浏览器设置中恢复', 'danger')
+                } else if (result === 'unsupported') {
+                  toast('当前浏览器不支持 Web Push；iOS 需先添加到主屏幕', 'danger')
+                } else {
+                  toast('推送订阅失败，请确认站点使用 HTTPS 并重试', 'danger')
+                }
               })
             }}
           >
-            {permission === 'granted'
-              ? '通知已启用'
+            {pushOn
+              ? '关闭桌面推送'
               : permission === 'denied'
                 ? '通知已被拒绝'
-                : permission === 'unsupported'
-                  ? '浏览器不支持'
-                  : '启用通知'}
+                : pushSupported()
+                  ? '启用桌面推送'
+                  : '浏览器不支持推送'}
           </button>
         </div>
       </section>
@@ -282,6 +302,13 @@ export function SettingsPage() {
           </span>
         </div>
       </section>
+
+      <DataScopeDialog
+        open={clearOpen}
+        mode="clear"
+        onClose={() => setClearOpen(false)}
+        onConfirm={(categories) => void performClear(categories)}
+      />
     </div>
   )
 }

@@ -13,6 +13,8 @@ interface SeatRowProps {
   index: number
   canDelete: boolean
   voteMode: VoteMode
+  isHead: boolean
+  onSetHead: () => void
 }
 
 export function SeatRow({
@@ -22,6 +24,8 @@ export function SeatRow({
   index,
   canDelete,
   voteMode,
+  isHead,
+  onSetHead,
 }: SeatRowProps) {
   const { dispatch, me } = useConference()
   const confirm = useConfirm()
@@ -66,6 +70,7 @@ export function SeatRow({
         ariaLabel="席位名称"
         editable={canEdit}
       />
+      {isHead ? <span className="badge badge-gold seat-head-badge">阁首</span> : null}
       {voteMode === 'MEMBER' ? (
         canEdit ? (
           <NumberStepper
@@ -96,6 +101,18 @@ export function SeatRow({
         }
         onClick={togglePresent}
       />
+      {canEdit ? (
+        <button
+          type="button"
+          className={`seat-head-btn${isHead ? ' active' : ''}`}
+          onClick={onSetHead}
+          title={isHead ? '当前阁首' : '设为阁首'}
+          aria-label={`将 ${seat.name} 设为阁首`}
+          disabled={isHead}
+        >
+          ♛
+        </button>
+      ) : null}
       {canEdit ? (
         <button
           type="button"

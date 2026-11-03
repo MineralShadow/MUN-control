@@ -10,6 +10,8 @@ import {
 import type {
   AccountInfo,
   Bootstrap,
+  ConferenceSummary,
+  MyMembership,
   ConferenceState,
   CouncilEvent,
   SessionUser,
@@ -28,12 +30,15 @@ interface ConferenceContextValue {
   events: CouncilEvent[]
   files: SubmittedFile[]
   accounts: AccountInfo[]
+  conferences: ConferenceSummary[]
+  myMembership: MyMembership | null
   revision: number
   serverNow: number
   pollMs: number
   setPollMs: (ms: number) => void
   dispatch: (action: Action) => void
   refresh: () => Promise<void>
+  switchToConference: (conferenceId: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -120,6 +125,11 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
     await load(false)
   }, [load])
 
+  const switchToConference = useCallback(async (conferenceId: string) => {
+    await apiFetch('/auth/switch', { method: 'POST', json: { conferenceId } })
+    window.location.reload()
+  }, [])
+
   const login = useCallback(
     async (username: string, password: string) => {
       await apiFetch('/auth/login', {
@@ -182,15 +192,18 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
       events: data.events,
       files: data.files,
       accounts: data.accounts,
+      conferences: data.conferences,
+      myMembership: data.myMembership,
       revision: data.revision,
       serverNow: data.serverNow,
       pollMs,
       setPollMs,
       dispatch,
       refresh,
+      switchToConference,
       logout,
     }
-  }, [data, dispatch, refresh, logout, pollMs, setPollMs])
+  }, [data, dispatch, refresh, switchToConference, logout, pollMs, setPollMs])
 
   if (loading && !data) {
     return (

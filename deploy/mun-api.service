@@ -1,0 +1,16 @@
+[Unit]
+Description=MUN Conference Console API
+After=network.target
+
+[Service]
+Type=simple
+User=mun
+WorkingDirectory=/var/www/mun
+EnvironmentFile=/etc/mun.env
+ExecStart=/usr/bin/node --experimental-strip-types server/prod.ts
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

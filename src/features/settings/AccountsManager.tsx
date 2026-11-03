@@ -13,6 +13,7 @@ export function AccountsManager() {
   const [username, setUsername] = useState('')
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState<'delegate' | 'chair'>('delegate')
   const [creating, setCreating] = useState(false)
 
   const [resetId, setResetId] = useState<string | null>(null)
@@ -52,11 +53,13 @@ export function AccountsManager() {
           username: username.trim(),
           name: name.trim(),
           password,
+          role,
         },
       })
       setUsername('')
       setName('')
       setPassword('')
+      setRole('delegate')
       await refresh()
       toast('代表账号已创建', 'success')
     } catch (error) {
@@ -110,7 +113,7 @@ export function AccountsManager() {
     <section className="settings-card">
       <div className="settings-card-head">
         <h2>账号管理</h2>
-        <p>创建代表登录账号；事件收件人从这里选择。初始主席账号为 123456 / abcd。</p>
+        <p>创建本会场的主席或代表账号。事件收件人从这里选择；初始主席账号为 123456 / abcd。</p>
       </div>
 
       <form className="account-create-form" onSubmit={createAccount}>
@@ -139,8 +142,17 @@ export function AccountsManager() {
           maxLength={80}
           aria-label="新账号初始密码"
         />
+        <select
+          className="select"
+          value={role}
+          onChange={(event) => setRole(event.target.value as 'delegate' | 'chair')}
+          aria-label="新账号角色"
+        >
+          <option value="delegate">代表</option>
+          <option value="chair">主席</option>
+        </select>
         <button type="submit" className="btn btn-primary" disabled={creating}>
-          {creating ? '创建中…' : '＋ 添加代表'}
+          {creating ? '创建中…' : role === 'chair' ? '＋ 添加主席' : '＋ 添加代表'}
         </button>
       </form>
 

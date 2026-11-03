@@ -4,6 +4,7 @@ export type RoutePath =
   | '/'
   | '/seats'
   | '/sessions'
+  | '/motions'
   | '/voting'
   | '/time'
   | '/events'
@@ -20,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/', label: '主页', en: 'HOME' },
   { path: '/seats', label: '席位', en: 'SEATS' },
   { path: '/sessions', label: '会期', en: 'SESSIONS' },
+  { path: '/motions', label: '会议主持', en: 'CHAIRS' },
   { path: '/voting', label: '投票', en: 'VOTING' },
   { path: '/time', label: '时间', en: 'TIME' },
   { path: '/events', label: '事件', en: 'EVENTS' },
