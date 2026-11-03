@@ -1,5 +1,6 @@
 import { createInitialState } from '../../src/state/defaults.ts'
 import { defaultMotionTypes } from '../../src/lib/motionTypes.ts'
+import { defaultFileTypes } from '../../src/lib/fileTypes.ts'
 import {
   ALL_CATEGORY_IDS,
   normalizeCategories,
@@ -59,6 +60,9 @@ export async function clearConferenceData(
       activeMotion: null,
     }
   }
+  if (has('files')) {
+    nextState = { ...nextState, fileTypes: defaultFileTypes() }
+  }
   nextState = { ...nextState, updatedAt: now }
 
   const statements = [
@@ -95,6 +99,10 @@ export async function clearConferenceData(
   if (has('events')) {
     statements.push(
       {
+        sql: 'DELETE FROM event_attachments WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)',
+        args: [conferenceId],
+      },
+      {
         sql: 'DELETE FROM event_recipients WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)',
         args: [conferenceId],
       },
@@ -106,10 +114,10 @@ export async function clearConferenceData(
     )
   }
   if (has('files')) {
-    statements.push({
-      sql: 'DELETE FROM files WHERE conference_id = ?',
-      args: [conferenceId],
-    })
+    statements.push(
+      { sql: 'DELETE FROM file_cosigners WHERE conference_id = ?', args: [conferenceId] },
+      { sql: 'DELETE FROM files WHERE conference_id = ?', args: [conferenceId] },
+    )
   }
 
   if (has('accounts')) {

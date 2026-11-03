@@ -114,7 +114,7 @@ pnpm dev
 
 ## 六、部署到 Vercel
 
-Vercel 部署见 **[部署指南.md](部署指南.md)**；阿里云 ECS 部署见 **[部署指南-阿里云.md](部署指南-阿里云.md)**。
+Vercel 部署见 **[部署指南.md](部署指南.md)**；阿里云 ECS 部署见 **[部署指南-阿里云.md](部署指南-阿里云.md)**；备案流程见 **[ICP备案指南.md](ICP备案指南.md)**。
 
 1. Turso 创建数据库，取得 `TURSO_DATABASE_URL` 与 `TURSO_AUTH_TOKEN`。
 2. 项目推送到 GitHub，在 Vercel 导入（框架 Vite，build `pnpm build`，output `dist`）。

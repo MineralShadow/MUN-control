@@ -76,6 +76,7 @@ const SCHEMA = [
     content TEXT NOT NULL,
     event_time INTEGER NOT NULL,
     is_crisis INTEGER NOT NULL DEFAULT 0,
+    is_realtime INTEGER NOT NULL DEFAULT 0,
     visibility TEXT NOT NULL DEFAULT 'SECRET',
     published_at INTEGER,
     created_at INTEGER NOT NULL,
@@ -100,6 +101,23 @@ const SCHEMA = [
     created_at INTEGER NOT NULL,
     data BLOB NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS event_attachments (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    conference_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS file_cosigners (
+    file_id TEXT NOT NULL,
+    conference_id TEXT NOT NULL,
+    delegation_id TEXT NOT NULL,
+    confirmed_at INTEGER,
+    confirmed_by TEXT,
+    PRIMARY KEY (file_id, delegation_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
     conference_id TEXT,
@@ -107,7 +125,9 @@ const SCHEMA = [
     filename TEXT NOT NULL,
     mime TEXT NOT NULL,
     size INTEGER NOT NULL,
+    file_type_id TEXT,
     file_type TEXT NOT NULL DEFAULT '其他',
+    text_content TEXT NOT NULL DEFAULT '',
     scope TEXT NOT NULL DEFAULT 'DELEGATION',
     delegation_id TEXT,
     co_sign INTEGER NOT NULL DEFAULT 0,
@@ -360,9 +380,12 @@ async function init(): Promise<void> {
   await ensureColumn('archives', 'conference_id', 'conference_id TEXT')
   await ensureColumn('sessions', 'conference_id', 'conference_id TEXT')
   await ensureColumn('files', 'file_type', "file_type TEXT NOT NULL DEFAULT '其他'")
+  await ensureColumn('files', 'file_type_id', 'file_type_id TEXT')
+  await ensureColumn('files', 'text_content', "text_content TEXT NOT NULL DEFAULT ''")
   await ensureColumn('files', 'scope', "scope TEXT NOT NULL DEFAULT 'DELEGATION'")
   await ensureColumn('files', 'delegation_id', 'delegation_id TEXT')
   await ensureColumn('files', 'co_sign', 'co_sign INTEGER NOT NULL DEFAULT 0')
+  await ensureColumn('events', 'is_realtime', 'is_realtime INTEGER NOT NULL DEFAULT 0')
   await ensureInitialChair()
   await ensureDefaultConference()
   await db.execute(

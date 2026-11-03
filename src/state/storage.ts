@@ -22,6 +22,7 @@ import { clampInt, toInt } from '../lib/format.ts'
 import { createId } from '../lib/id.ts'
 import { judgeVote } from '../lib/voting.ts'
 import { defaultMotionTypes } from '../lib/motionTypes.ts'
+import { normalizeFileTypes } from '../lib/fileTypes.ts'
 import {
   DEFAULT_AUTHOR,
   DEFAULT_SETTINGS,
@@ -348,6 +349,7 @@ export function normalizeState(input: unknown): ConferenceState | null {
     resolutions,
     motionTypes: finalMotionTypes,
     activeMotion: normalizeActiveMotion(input.activeMotion),
+    fileTypes: normalizeFileTypes(input.fileTypes),
     settings,
     updatedAt: toInt(input.updatedAt, Date.now()),
   }

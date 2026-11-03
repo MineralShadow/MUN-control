@@ -24,6 +24,8 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
     toDatetimeLocal(event?.eventTime ?? time.currentMs),
   )
   const [isCrisis, setIsCrisis] = useState(event?.isCrisis ?? false)
+  const [isRealtime, setIsRealtime] = useState(event?.isRealtime ?? false)
+  const [attachment, setAttachment] = useState<File | null>(null)
   const [visibility, setVisibility] = useState<'PUBLIC' | 'SECRET'>(
     event?.visibility ?? 'PUBLIC',
   )
@@ -49,7 +51,7 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
       toast('请填写事件标题', 'danger')
       return
     }
-    const eventTime = fromDatetimeLocal(timeValue)
+    const eventTime = isRealtime ? time.currentMs : fromDatetimeLocal(timeValue)
     if (eventTime === null) {
       toast('请选择有效的事件时间', 'danger')
       return
@@ -62,13 +64,27 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
         content: content.trim(),
         eventTime,
         isCrisis,
+        isRealtime,
         visibility: isCrisis ? 'PUBLIC' : visibility,
         recipientIds: isCrisis || visibility === 'PUBLIC' ? [] : recipientIds,
       }
+      let eventId = event?.id
       if (event) {
         await apiFetch(`/events/${event.id}`, { method: 'PATCH', json: payload })
       } else {
-        await apiFetch('/events', { method: 'POST', json: payload })
+        const created = await apiFetch<{ id: string }>('/events', {
+          method: 'POST',
+          json: payload,
+        })
+        eventId = created.id
+      }
+      if (attachment && eventId) {
+        const form = new FormData()
+        form.set('file', attachment)
+        await apiFetch(`/events/${eventId}/attachment`, {
+          method: 'POST',
+          body: form,
+        })
       }
       toast(event ? '事件已更新' : '事件已创建', 'success')
       onSaved()
@@ -120,6 +136,14 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
           />
         </label>
 
+        <div className="event-realtime-row">
+          <div>
+            <span className="field-label">实时发送</span>
+            <p className="hint">实时事件不需要填写发布时间，保存后立即发布。</p>
+          </div>
+          <Toggle checked={isRealtime} onChange={setIsRealtime} label="实时发送事件" />
+        </div>
+
         <div className="event-form-row">
           <label className="field">
             <span>事件时间（会议时间）</span>
@@ -128,7 +152,7 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
               type="datetime-local"
               step="1"
               value={timeValue}
-              disabled={published}
+              disabled={published || isRealtime}
               onChange={(inputEvent) => setTimeValue(inputEvent.target.value)}
             />
           </label>
@@ -147,6 +171,22 @@ export function EventForm({ event, accounts, onClose, onSaved }: EventFormProps)
             />
           </div>
         </div>
+
+        <label className="field">
+          <span>附件（可选，≤2MB）</span>
+          <input
+            className="input file-input"
+            type="file"
+            onChange={(inputEvent) => setAttachment(inputEvent.target.files?.[0] ?? null)}
+          />
+          <small className="hint">
+            {attachment
+              ? `${attachment.name} · ${(attachment.size / 1024).toFixed(1)} KB`
+              : event?.attachment
+                ? `已有附件：${event.attachment.filename}（重新选择可替换）`
+                : '尚未选择附件'}
+          </small>
+        </label>
 
         <div className="event-visibility">
           <span className="field-label">展示范围</span>

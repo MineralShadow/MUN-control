@@ -225,14 +225,14 @@ export function SettingsPage() {
         <div className="setting-row">
           <div className="setting-copy">
             <h3>数据刷新频率</h3>
-            <p>默认 2 秒；5 秒 / 10 秒更省流量，但事件提醒会更慢。</p>
+            <p>默认 1 秒；2 秒 / 5 秒更省流量，但事件提醒会更慢。</p>
           </div>
           <Segmented
             value={String(pollMs)}
             options={[
+              { value: '1000', label: '1 秒' },
               { value: '2000', label: '2 秒' },
               { value: '5000', label: '5 秒' },
-              { value: '10000', label: '10 秒' },
             ]}
             onChange={(value) => setPollMs(Number(value))}
             ariaLabel="数据刷新频率"

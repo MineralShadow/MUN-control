@@ -35,12 +35,14 @@ interface ArchiveEvent {
   content: string
   eventTime: number
   isCrisis: boolean
+  isRealtime: boolean
   visibility: string
   publishedAt: number | null
   createdAt: number
   createdBy: string
   recipients: Array<{ accountId: string; read: boolean }>
   reads: Array<{ accountId: string; read: boolean }>
+  attachment: { filename: string; mime: string; size: number; data: string } | null
 }
 
 interface ArchiveFile {
@@ -53,6 +55,7 @@ interface ArchiveFile {
   scope: string
   delegationId: string | null
   coSign: boolean
+  cosigners: Array<{ delegationId: string; confirmedAt: number | null; confirmedBy: string | null }>
   data: string
   submittedBy: string
   submittedAt: number
@@ -138,6 +141,7 @@ function trimmedState(
     resolutions: has('sessions') ? state.resolutions : [],
     motionTypes: has('motions') ? state.motionTypes : createInitialState().motionTypes,
     activeMotion: has('motions') ? state.activeMotion : null,
+    fileTypes: has('files') ? state.fileTypes : createInitialState().fileTypes,
   }
 }
 
@@ -176,7 +180,7 @@ export async function createArchive(
   const db = getDb()
   const included = normalizeCategories(includedRaw)
   const has = (id: DataCategoryId) => included.includes(id)
-  const [meeting, conference, time, members, events, recipients, reads, files] =
+  const [meeting, conference, time, members, events, recipients, reads, attachments, files, fileCosigners] =
     await Promise.all([
       loadMeeting(conferenceId),
       db.execute({
@@ -219,9 +223,23 @@ export async function createArchive(
             args: [conferenceId],
           })
         : Promise.resolve({ rows: [] }),
+      has('events')
+        ? db.execute({
+            sql: `SELECT a.* FROM event_attachments a
+                  JOIN events e ON e.id = a.event_id
+                  WHERE e.conference_id = ?`,
+            args: [conferenceId],
+          })
+        : Promise.resolve({ rows: [] }),
       has('files')
         ? db.execute({
             sql: 'SELECT * FROM files WHERE conference_id = ? ORDER BY submitted_at ASC',
+            args: [conferenceId],
+          })
+        : Promise.resolve({ rows: [] }),
+      has('files')
+        ? db.execute({
+            sql: 'SELECT * FROM file_cosigners WHERE conference_id = ?',
             args: [conferenceId],
           })
         : Promise.resolve({ rows: [] }),
@@ -269,6 +287,7 @@ export async function createArchive(
       content: String(row.content),
       eventTime: Number(row.event_time),
       isCrisis: Number(row.is_crisis) === 1,
+      isRealtime: Number(row.is_realtime ?? 0) === 1,
       visibility: String(row.visibility ?? 'SECRET'),
       publishedAt: row.published_at === null ? null : Number(row.published_at),
       createdAt: Number(row.created_at),
@@ -279,6 +298,17 @@ export async function createArchive(
       reads: readRows
         .filter((item) => item.eventId === String(row.id))
         .map((item) => ({ accountId: item.accountId, read: item.read })),
+      attachment: (() => {
+        const att = attachments.rows.find((item) => String(item.event_id) === String(row.id))
+        return att
+          ? {
+              filename: String(att.filename),
+              mime: String(att.mime),
+              size: Number(att.size),
+              data: bytesToBase64(att.data),
+            }
+          : null
+      })(),
     })),
     files: files.rows.map((row) => ({
       id: String(row.id),
@@ -290,6 +320,13 @@ export async function createArchive(
       scope: String(row.scope ?? 'DELEGATION'),
       delegationId: row.delegation_id ? String(row.delegation_id) : null,
       coSign: Number(row.co_sign ?? 0) === 1,
+      cosigners: fileCosigners.rows
+        .filter((item) => String(item.file_id) === String(row.id))
+        .map((item) => ({
+          delegationId: String(item.delegation_id),
+          confirmedAt: item.confirmed_at === null ? null : Number(item.confirmed_at),
+          confirmedBy: item.confirmed_by ? String(item.confirmed_by) : null,
+        })),
       data: bytesToBase64(row.data),
       submittedBy: String(row.submitted_by),
       submittedAt: Number(row.submitted_at),
@@ -364,6 +401,7 @@ export async function restoreArchive(
           activeMotion: archivedState.activeMotion,
         }
       : {}),
+    ...(has('files') ? { fileTypes: archivedState.fileTypes } : {}),
     updatedAt: Date.now(),
   }
   const revision = current.revision + 1
@@ -405,6 +443,10 @@ export async function restoreArchive(
   if (has('events')) {
     statements.push(
       {
+        sql: 'DELETE FROM event_attachments WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)',
+        args: [conferenceId],
+      },
+      {
         sql: 'DELETE FROM event_recipients WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)',
         args: [conferenceId],
       },
@@ -417,8 +459,8 @@ export async function restoreArchive(
     for (const event of data.events) {
       statements.push({
         sql: `INSERT INTO events
-              (id, conference_id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, conference_id, title, content, event_time, is_crisis, is_realtime, visibility, published_at, created_at, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           event.id,
           conferenceId,
@@ -426,6 +468,7 @@ export async function restoreArchive(
           event.content,
           event.eventTime,
           event.isCrisis ? 1 : 0,
+          event.isRealtime ? 1 : 0,
           event.visibility,
           event.publishedAt,
           event.createdAt,
@@ -444,9 +487,29 @@ export async function restoreArchive(
           args: [event.id, read.accountId, read.read ? 1 : 0],
         })
       }
+      if (event.attachment) {
+        statements.push({
+          sql: `INSERT INTO event_attachments
+                (id, event_id, conference_id, filename, mime, size, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            createId('att'),
+            event.id,
+            conferenceId,
+            event.attachment.filename,
+            event.attachment.mime,
+            event.attachment.size,
+            base64ToBytes(event.attachment.data),
+          ],
+        })
+      }
     }
   }
   if (has('files')) {
+    statements.push({
+      sql: 'DELETE FROM file_cosigners WHERE conference_id = ?',
+      args: [conferenceId],
+    })
     statements.push({
       sql: 'DELETE FROM files WHERE conference_id = ?',
       args: [conferenceId],
@@ -473,6 +536,20 @@ export async function restoreArchive(
           file.read ? 1 : 0,
         ],
       })
+      for (const cosigner of file.cosigners ?? []) {
+        statements.push({
+          sql: `INSERT INTO file_cosigners
+                (file_id, conference_id, delegation_id, confirmed_at, confirmed_by)
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [
+            file.id,
+            conferenceId,
+            cosigner.delegationId,
+            cosigner.confirmedAt,
+            cosigner.confirmedBy,
+          ],
+        })
+      }
     }
   }
   if (has('accounts')) {

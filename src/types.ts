@@ -65,6 +65,21 @@ export interface Settings {
 
 export type FileScope = 'PERSONAL' | 'DELEGATION'
 
+export interface FileType {
+  id: string
+  name: string
+  allowPersonal: boolean
+  forceCoSign: boolean
+  allowPublic: boolean
+}
+
+export interface FileCosigner {
+  delegationId: string
+  delegationName: string
+  confirmedAt: number | null
+  confirmedByName: string | null
+}
+
 export interface MotionType {
   id: string
   name: string
@@ -147,6 +162,7 @@ export interface ConferenceState {
   resolutions: Resolution[]
   motionTypes: MotionType[]
   activeMotion: ActiveMotion | null
+  fileTypes: FileType[]
   settings: Settings
   updatedAt: number
 }
@@ -201,6 +217,13 @@ export interface TimeState {
   updatedAt: number
 }
 
+export interface EventAttachment {
+  id: string
+  filename: string
+  mime: string
+  size: number
+}
+
 export interface EventRecipientView {
   accountId: string
   name: string
@@ -214,6 +237,8 @@ export interface CouncilEvent {
   /** 事件时间（会议时间） */
   eventTime: number
   isCrisis: boolean
+  isRealtime: boolean
+  attachment: EventAttachment | null
   /** 公开：所有账号可见；秘密：仅 recipients 可见 */
   visibility: EventVisibility
   /** 当前账号是否属于该事件的展示对象（主席管理列表里也用于弹窗） */
@@ -235,11 +260,16 @@ export interface SubmittedFile {
   filename: string
   mime: string
   size: number
+  fileTypeId: string | null
   fileType: string
+  textContent: string
   scope: FileScope
   delegationId: string | null
   delegationName: string | null
   coSign: boolean
+  cosigners: FileCosigner[]
+  myConfirmation: 'PENDING' | 'CONFIRMED' | null
+  canConfirm: boolean
   submittedAt: number
   submittedById: string
   submittedByName: string

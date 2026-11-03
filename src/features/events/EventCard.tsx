@@ -26,7 +26,10 @@ export function EventCard({
       <header className="event-head">
         <div className="event-heading">
           <div className="event-time-line">
-            <span className="event-time">{formatDateTime(event.eventTime)}</span>
+            <span className="event-time">
+              {event.isRealtime ? '实时发布' : formatDateTime(event.eventTime)}
+            </span>
+            {event.isRealtime ? <span className="badge badge-live">实时</span> : null}
             <span className={`badge ${published ? 'badge-published' : 'badge-scheduled'}`}>
               {published ? '已发布' : '定时发布'}
             </span>
@@ -74,6 +77,15 @@ export function EventCard({
       </header>
 
       {event.content ? <div className="event-content">{event.content}</div> : null}
+      {event.attachment ? (
+        <a
+          className="event-attachment"
+          href={`/api?route=${encodeURIComponent(`/events/${event.id}/attachment`)}`}
+          download={event.attachment.filename}
+        >
+          附件：{event.attachment.filename}（{(event.attachment.size / 1024).toFixed(1)} KB）
+        </a>
+      ) : null}
 
       <footer className="event-foot">
         {canEdit ? (

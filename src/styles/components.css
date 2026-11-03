@@ -1515,3 +1515,135 @@
     flex-direction: column;
   }
 }
+
+/* ---------- 联署 / 文件类型 / 实时附件 ---------- */
+
+.badge-live {
+  border-color: rgba(178, 59, 59, 0.3);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.event-realtime-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf9;
+}
+
+.event-attachment {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf9;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  text-decoration: none;
+}
+
+.event-attachment:hover {
+  border-color: var(--gold);
+}
+
+.file-cosign-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.file-text {
+  margin: 8px 0 6px;
+  padding: 9px 12px;
+  border-left: 2px solid var(--gold);
+  background: var(--gold-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.file-cosigner-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cosigner-chip {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.cosigner-chip.confirmed {
+  border-color: rgba(47, 125, 92, 0.25);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.file-text-field {
+  grid-column: 1 / -1;
+}
+
+.file-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf9;
+}
+
+.file-type-name {
+  flex: 1;
+  min-width: 110px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.file-type-row label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.file-alerts {
+  margin-top: 0;
+}
+
+@media (max-width: 700px) {
+  .event-realtime-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .file-type-row {
+    align-items: flex-start;
+  }
+}

@@ -3,6 +3,7 @@ import type {
   Author,
   ConferenceState,
   Delegation,
+  FileType,
   MotionType,
   Resolution,
   Seat,
@@ -48,6 +49,9 @@ export type Action =
   | { type: 'motionType/delete'; id: string }
   | { type: 'motion/start'; motion: ActiveMotion }
   | { type: 'motion/end'; endedAt: number }
+  | { type: 'fileType/add'; fileType: FileType }
+  | { type: 'fileType/update'; fileType: FileType }
+  | { type: 'fileType/delete'; id: string }
   | { type: 'settings/patch'; patch: Partial<Settings> }
   | { type: 'state/replace'; state: ConferenceState }
   | { type: 'state/reset' }
@@ -362,6 +366,23 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
       return state.activeMotion
         ? { ...state, activeMotion: { ...state.activeMotion, endedAt: action.endedAt } }
         : state
+
+    case 'fileType/add':
+      return { ...state, fileTypes: [...state.fileTypes, action.fileType] }
+
+    case 'fileType/update':
+      return {
+        ...state,
+        fileTypes: state.fileTypes.map((item) =>
+          item.id === action.fileType.id ? action.fileType : item,
+        ),
+      }
+
+    case 'fileType/delete':
+      return {
+        ...state,
+        fileTypes: state.fileTypes.filter((item) => item.id !== action.id),
+      }
 
     case 'settings/patch':
       return { ...state, settings: { ...state.settings, ...action.patch } }

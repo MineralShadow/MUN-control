@@ -54,7 +54,7 @@ function mergeBootstrap(previous: Bootstrap | null, next: Bootstrap): Bootstrap 
 }
 
 const POLL_KEY = 'mun_poll_ms'
-const POLL_OPTIONS = [2000, 5000, 10000]
+const POLL_OPTIONS = [1000, 2000, 5000]
 
 export function ConferenceProvider({ children }: { children: ReactNode }) {
   const toast = useToast()
@@ -62,7 +62,7 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
   const [pollMs, setPollMsState] = useState(() => {
     if (typeof window === 'undefined') return 2000
     const saved = Number(window.localStorage.getItem(POLL_KEY))
-    return POLL_OPTIONS.includes(saved) ? saved : 2000
+    return POLL_OPTIONS.includes(saved) ? saved : 1000
   })
   const [loading, setLoading] = useState(true)
   const [fatal, setFatal] = useState<string | null>(null)

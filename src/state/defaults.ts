@@ -1,5 +1,6 @@
 import type { Author, ConferenceState, Settings } from '../types'
 import { defaultMotionTypes } from '../lib/motionTypes.ts'
+import { defaultFileTypes } from '../lib/fileTypes.ts'
 
 export const DEFAULT_THEME = '历史委员会'
 export const SCHEMA_VERSION = 2
@@ -31,6 +32,7 @@ export function createInitialState(): ConferenceState {
     resolutions: [],
     motionTypes: defaultMotionTypes(),
     activeMotion: null,
+    fileTypes: defaultFileTypes(),
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: Date.now(),
   }

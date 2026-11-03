@@ -9252,20 +9252,6 @@ function createId(prefix = "id") {
   return `${prefix}_${raw2.replace(/-/g, "").slice(0, 12)}`;
 }
 
-// src/lib/fileTypes.ts
-var FILE_TYPES = [
-  "\u5DE5\u4F5C\u6587\u4EF6",
-  "\u51B3\u8BAE\u8349\u6848",
-  "\u4FEE\u6B63\u6848",
-  "\u6307\u4EE4\u8349\u6848",
-  "\u7ACB\u573A\u6587\u4EF6",
-  "\u5176\u4ED6"
-];
-function normalizeFileType(value) {
-  const text2 = typeof value === "string" ? value.trim() : "";
-  return FILE_TYPES.includes(text2) ? text2 : "\u5176\u4ED6";
-}
-
 // server/api/password.ts
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 function hashPassword(password) {
@@ -10715,6 +10701,59 @@ function defaultMotionTypes() {
   return DEFAULT_MOTION_TYPES.map((item) => ({ ...item }));
 }
 
+// src/lib/fileTypes.ts
+var DEFAULT_FILE_TYPES = [
+  {
+    id: "file-directive",
+    name: "\u6307\u4EE4\u6587\u4EF6",
+    allowPersonal: true,
+    forceCoSign: false,
+    allowPublic: false
+  },
+  {
+    id: "file-draft-resolution",
+    name: "\u51B3\u8BAE\u8349\u6848",
+    allowPersonal: false,
+    forceCoSign: false,
+    allowPublic: true
+  },
+  {
+    id: "file-amendment",
+    name: "\u4FEE\u6B63\u6848",
+    allowPersonal: false,
+    forceCoSign: false,
+    allowPublic: true
+  },
+  {
+    id: "file-agreement",
+    name: "\u534F\u5B9A",
+    allowPersonal: false,
+    forceCoSign: true,
+    allowPublic: true
+  },
+  {
+    id: "file-statement",
+    name: "\u58F0\u660E",
+    allowPersonal: false,
+    forceCoSign: false,
+    allowPublic: true
+  }
+];
+function defaultFileTypes() {
+  return DEFAULT_FILE_TYPES.map((item) => ({ ...item }));
+}
+function normalizeFileTypes(value) {
+  if (!Array.isArray(value)) return defaultFileTypes();
+  const types = value.filter((item) => Boolean(item) && typeof item === "object").map((item, index) => ({
+    id: typeof item.id === "string" && item.id ? item.id : `file-type-${index + 1}`,
+    name: typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0, 40) : `\u6587\u4EF6\u7C7B\u578B ${index + 1}`,
+    allowPersonal: item.allowPersonal === true,
+    forceCoSign: item.forceCoSign === true,
+    allowPublic: item.allowPublic === true
+  }));
+  return types.length > 0 ? types : defaultFileTypes();
+}
+
 // src/state/defaults.ts
 var DEFAULT_THEME = "\u5386\u53F2\u59D4\u5458\u4F1A";
 var SCHEMA_VERSION = 2;
@@ -10743,6 +10782,7 @@ function createInitialState() {
     resolutions: [],
     motionTypes: defaultMotionTypes(),
     activeMotion: null,
+    fileTypes: defaultFileTypes(),
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: Date.now()
   };
@@ -10820,6 +10860,7 @@ var SCHEMA = [
     content TEXT NOT NULL,
     event_time INTEGER NOT NULL,
     is_crisis INTEGER NOT NULL DEFAULT 0,
+    is_realtime INTEGER NOT NULL DEFAULT 0,
     visibility TEXT NOT NULL DEFAULT 'SECRET',
     published_at INTEGER,
     created_at INTEGER NOT NULL,
@@ -10844,6 +10885,23 @@ var SCHEMA = [
     created_at INTEGER NOT NULL,
     data BLOB NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS event_attachments (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    conference_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS file_cosigners (
+    file_id TEXT NOT NULL,
+    conference_id TEXT NOT NULL,
+    delegation_id TEXT NOT NULL,
+    confirmed_at INTEGER,
+    confirmed_by TEXT,
+    PRIMARY KEY (file_id, delegation_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,
     conference_id TEXT,
@@ -10851,7 +10909,9 @@ var SCHEMA = [
     filename TEXT NOT NULL,
     mime TEXT NOT NULL,
     size INTEGER NOT NULL,
+    file_type_id TEXT,
     file_type TEXT NOT NULL DEFAULT '\u5176\u4ED6',
+    text_content TEXT NOT NULL DEFAULT '',
     scope TEXT NOT NULL DEFAULT 'DELEGATION',
     delegation_id TEXT,
     co_sign INTEGER NOT NULL DEFAULT 0,
@@ -11070,9 +11130,12 @@ async function init() {
   await ensureColumn("archives", "conference_id", "conference_id TEXT");
   await ensureColumn("sessions", "conference_id", "conference_id TEXT");
   await ensureColumn("files", "file_type", "file_type TEXT NOT NULL DEFAULT '\u5176\u4ED6'");
+  await ensureColumn("files", "file_type_id", "file_type_id TEXT");
+  await ensureColumn("files", "text_content", "text_content TEXT NOT NULL DEFAULT ''");
   await ensureColumn("files", "scope", "scope TEXT NOT NULL DEFAULT 'DELEGATION'");
   await ensureColumn("files", "delegation_id", "delegation_id TEXT");
   await ensureColumn("files", "co_sign", "co_sign INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("events", "is_realtime", "is_realtime INTEGER NOT NULL DEFAULT 0");
   await ensureInitialChair();
   await ensureDefaultConference();
   await db.execute(
@@ -11553,6 +11616,7 @@ function toEventRow(row) {
     content: String(row.content),
     event_time: Number(row.event_time),
     is_crisis: Number(row.is_crisis),
+    is_realtime: Number(row.is_realtime ?? 0),
     visibility: row.visibility === "PUBLIC" ? "PUBLIC" : "SECRET",
     published_at: row.published_at === null ? null : Number(row.published_at),
     created_at: Number(row.created_at),
@@ -11639,11 +11703,26 @@ function baseEvent(row) {
     content: row.content,
     eventTime: row.event_time,
     isCrisis: row.is_crisis === 1,
+    isRealtime: row.is_realtime === 1,
+    attachment: null,
     visibility: row.visibility === "PUBLIC" ? "PUBLIC" : "SECRET",
     publishedAt: row.published_at,
     createdAt: row.created_at,
     createdBy: row.created_by
   };
+}
+async function getAttachment(eventId) {
+  const result = await getDb().execute({
+    sql: "SELECT id, filename, mime, size FROM event_attachments WHERE event_id = ? LIMIT 1",
+    args: [eventId]
+  });
+  const row = result.rows[0];
+  return row ? {
+    id: String(row.id),
+    filename: String(row.filename),
+    mime: String(row.mime),
+    size: Number(row.size)
+  } : null;
 }
 async function listEventsForChair(user, conferenceId) {
   const result = await getDb().execute({
@@ -11661,6 +11740,7 @@ async function listEventsForChair(user, conferenceId) {
     const readCount = publicEvent ? await countReads(row.id) : recipients.filter((item) => item.read).length;
     events.push({
       ...baseEvent(row),
+      attachment: await getAttachment(row.id),
       recipients,
       inAudience,
       read,
@@ -11687,17 +11767,20 @@ async function listEventsForDelegate(user, conferenceId) {
           ORDER BY e.event_time DESC, e.created_at DESC`,
     args: [user.id, conferenceId, user.id]
   });
-  return result.rows.map((raw2) => {
+  const events = [];
+  for (const raw2 of result.rows) {
     const row = toEventRow(raw2);
-    return {
+    events.push({
       ...baseEvent(row),
+      attachment: await getAttachment(row.id),
       recipients: [],
       inAudience: true,
       read: Number(raw2.my_read) === 1,
       readCount: Number(raw2.my_read) === 1 ? 1 : 0,
       recipientCount: 0
-    };
-  });
+    });
+  }
+  return events;
 }
 async function listEvents(user) {
   return user.role === "chair" ? listEventsForChair(user, user.conferenceId) : listEventsForDelegate(user, user.conferenceId);
@@ -11722,8 +11805,8 @@ async function createEvent(user, input) {
   const visibility = input.isCrisis ? "PUBLIC" : input.visibility;
   await db.execute({
     sql: `INSERT INTO events
-          (id, conference_id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          (id, conference_id, title, content, event_time, is_crisis, is_realtime, visibility, published_at, created_at, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     args: [
       id,
       user.conferenceId,
@@ -11731,6 +11814,7 @@ async function createEvent(user, input) {
       input.content,
       input.eventTime,
       input.isCrisis ? 1 : 0,
+      input.isRealtime ? 1 : 0,
       visibility,
       createdAt,
       user.id
@@ -11761,6 +11845,7 @@ async function updateEvent(eventId, user, input) {
       input.content,
       row.published_at ? row.event_time : input.eventTime,
       input.isCrisis ? 1 : 0,
+      input.isRealtime ? 1 : 0,
       visibility,
       eventId,
       user.conferenceId
@@ -11789,6 +11874,7 @@ async function deleteEvent(eventId, user) {
   if (existing.rows.length === 0) return false;
   await db.execute({ sql: "DELETE FROM event_recipients WHERE event_id = ?", args: [eventId] });
   await db.execute({ sql: "DELETE FROM event_reads WHERE event_id = ?", args: [eventId] });
+  await db.execute({ sql: "DELETE FROM event_attachments WHERE event_id = ?", args: [eventId] });
   await db.execute({ sql: "DELETE FROM events WHERE id = ?", args: [eventId] });
   await clearCrisisPause(user.conferenceId, eventId);
   return true;
@@ -11815,6 +11901,57 @@ async function setEventRead(user, eventId, read) {
     });
   }
   return true;
+}
+async function setEventAttachment(user, eventId, input) {
+  if (user.role !== "chair") return false;
+  const db = getDb();
+  const event = await db.execute({
+    sql: "SELECT id FROM events WHERE id = ? AND conference_id = ? LIMIT 1",
+    args: [eventId, user.conferenceId]
+  });
+  if (event.rows.length === 0) return false;
+  await db.execute({
+    sql: "DELETE FROM event_attachments WHERE event_id = ?",
+    args: [eventId]
+  });
+  await db.execute({
+    sql: `INSERT INTO event_attachments
+          (id, event_id, conference_id, filename, mime, size, data)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      createId("att"),
+      eventId,
+      user.conferenceId,
+      input.filename.slice(0, 200),
+      input.mime,
+      input.size,
+      input.bytes
+    ]
+  });
+  return true;
+}
+async function getEventAttachmentForDownload(user, eventId) {
+  const db = getDb();
+  const event = await db.execute({
+    sql: "SELECT visibility, published_at FROM events WHERE id = ? AND conference_id = ? LIMIT 1",
+    args: [eventId, user.conferenceId]
+  });
+  const eventRow = event.rows[0];
+  if (!eventRow) return null;
+  if (user.role !== "chair") {
+    if (eventRow.published_at === null) return null;
+    const publicEvent = eventRow.visibility === "PUBLIC";
+    if (!publicEvent && !await isRecipient(eventId, user.id)) return null;
+  }
+  const result = await db.execute({
+    sql: "SELECT filename, mime, data FROM event_attachments WHERE event_id = ? LIMIT 1",
+    args: [eventId]
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  const data = row.data;
+  const bytes = data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(Buffer.from(String(data), "base64"));
+  return { filename: String(row.filename), mime: String(row.mime), bytes };
 }
 
 // src/lib/format.ts
@@ -12060,6 +12197,20 @@ function baseReducer(state, action) {
       return { ...state, activeMotion: action.motion };
     case "motion/end":
       return state.activeMotion ? { ...state, activeMotion: { ...state.activeMotion, endedAt: action.endedAt } } : state;
+    case "fileType/add":
+      return { ...state, fileTypes: [...state.fileTypes, action.fileType] };
+    case "fileType/update":
+      return {
+        ...state,
+        fileTypes: state.fileTypes.map(
+          (item) => item.id === action.fileType.id ? action.fileType : item
+        )
+      };
+    case "fileType/delete":
+      return {
+        ...state,
+        fileTypes: state.fileTypes.filter((item) => item.id !== action.id)
+      };
     case "settings/patch":
       return { ...state, settings: { ...state.settings, ...action.patch } };
     case "state/replace":
@@ -12357,6 +12508,7 @@ function normalizeState(input) {
     resolutions,
     motionTypes: finalMotionTypes,
     activeMotion: normalizeActiveMotion(input.activeMotion),
+    fileTypes: normalizeFileTypes(input.fileTypes),
     settings,
     updatedAt: toInt(input.updatedAt, Date.now())
   };
@@ -12430,25 +12582,7 @@ async function applyConferenceAction(conferenceId, action) {
 }
 
 // server/api/files.ts
-function toFile(row) {
-  return {
-    id: String(row.id),
-    title: String(row.title),
-    filename: String(row.filename),
-    mime: String(row.mime),
-    size: Number(row.size),
-    fileType: String(row.file_type ?? "\u5176\u4ED6"),
-    scope: row.scope === "PERSONAL" ? "PERSONAL" : "DELEGATION",
-    delegationId: row.delegation_id ? String(row.delegation_id) : null,
-    delegationName: row.delegation_name ? String(row.delegation_name) : null,
-    coSign: Number(row.co_sign ?? 0) === 1,
-    submittedAt: Number(row.submitted_at),
-    submittedById: String(row.submitted_by),
-    submittedByName: row.submitted_name ? String(row.submitted_name) : "\u5DF2\u5220\u9664\u8D26\u53F7",
-    read: Number(row.read) === 1
-  };
-}
-async function getMyDelegationId(user) {
+async function getMyMembershipInfo(user) {
   if (user.role === "chair") return null;
   const member = await getDb().execute({
     sql: "SELECT seat_id FROM conference_members WHERE conference_id = ? AND account_id = ? LIMIT 1",
@@ -12457,9 +12591,59 @@ async function getMyDelegationId(user) {
   const seatId = member.rows[0]?.seat_id ? String(member.rows[0].seat_id) : null;
   if (!seatId) return null;
   const meeting = await loadMeeting(user.conferenceId);
-  return meeting.state.delegations.find(
-    (delegation) => delegation.seats.some((seat) => seat.id === seatId)
-  )?.id ?? null;
+  for (const delegation of meeting.state.delegations) {
+    if (delegation.seats.some((seat) => seat.id === seatId)) {
+      return {
+        delegationId: delegation.id,
+        delegationName: delegation.name,
+        seatId,
+        isHead: delegation.headSeatId === seatId
+      };
+    }
+  }
+  return null;
+}
+async function getCosigners(fileId, delegationNames) {
+  const result = await getDb().execute({
+    sql: `SELECT fc.delegation_id, fc.confirmed_at, a.name AS confirmed_name
+          FROM file_cosigners fc
+          LEFT JOIN accounts a ON a.id = fc.confirmed_by
+          WHERE fc.file_id = ?
+          ORDER BY fc.delegation_id ASC`,
+    args: [fileId]
+  });
+  return result.rows.map((row) => ({
+    delegationId: String(row.delegation_id),
+    delegationName: delegationNames.get(String(row.delegation_id)) ?? "\u5DF2\u5220\u9664\u4EE3\u8868\u56E2",
+    confirmedAt: row.confirmed_at === null ? null : Number(row.confirmed_at),
+    confirmedByName: row.confirmed_name ? String(row.confirmed_name) : null
+  }));
+}
+function toFile(row, cosigners, myMembership, isChair) {
+  const mine = myMembership ? cosigners.find((item) => item.delegationId === myMembership.delegationId) : void 0;
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    filename: String(row.filename),
+    mime: String(row.mime),
+    size: Number(row.size),
+    fileTypeId: row.file_type_id ? String(row.file_type_id) : null,
+    fileType: String(row.file_type ?? "\u5176\u4ED6"),
+    textContent: String(row.text_content ?? ""),
+    scope: row.scope === "PERSONAL" ? "PERSONAL" : "DELEGATION",
+    delegationId: row.delegation_id ? String(row.delegation_id) : null,
+    delegationName: row.delegation_name ? String(row.delegation_name) : null,
+    coSign: Number(row.co_sign ?? 0) === 1,
+    cosigners,
+    myConfirmation: mine ? mine.confirmedAt ? "CONFIRMED" : "PENDING" : null,
+    canConfirm: Boolean(
+      mine && myMembership?.isHead && !mine.confirmedAt && !isChair
+    ),
+    submittedAt: Number(row.submitted_at),
+    submittedById: String(row.submitted_by),
+    submittedByName: row.submitted_name ? String(row.submitted_name) : "\u5DF2\u5220\u9664\u8D26\u53F7",
+    read: Number(row.read) === 1
+  };
 }
 async function listFiles(user) {
   const db = getDb();
@@ -12467,6 +12651,7 @@ async function listFiles(user) {
   const delegationNames = new Map(
     meeting.state.delegations.map((delegation) => [delegation.id, delegation.name])
   );
+  const myMembership = await getMyMembershipInfo(user);
   let result;
   if (user.role === "chair") {
     result = await db.execute({
@@ -12477,28 +12662,52 @@ async function listFiles(user) {
       args: [user.conferenceId]
     });
   } else {
-    const delegationId = await getMyDelegationId(user);
     result = await db.execute({
       sql: `SELECT f.*, a.name AS submitted_name
             FROM files f LEFT JOIN accounts a ON a.id = f.submitted_by
             WHERE f.conference_id = ?
-              AND (f.submitted_by = ? OR (f.scope = 'DELEGATION' AND f.delegation_id = ?))
+              AND (
+                f.submitted_by = ?
+                OR (f.scope = 'DELEGATION' AND f.delegation_id = ?)
+                OR EXISTS (
+                  SELECT 1 FROM file_cosigners fc
+                  WHERE fc.file_id = f.id AND fc.delegation_id = ?
+                )
+              )
             ORDER BY f.submitted_at DESC`,
-      args: [user.conferenceId, user.id, delegationId]
+      args: [
+        user.conferenceId,
+        user.id,
+        myMembership?.delegationId ?? "",
+        myMembership?.delegationId ?? ""
+      ]
     });
   }
-  return result.rows.map((row) => {
-    const file = toFile({ ...row, delegation_name: row.delegation_id ? delegationNames.get(String(row.delegation_id)) ?? null : null });
-    return file;
-  });
+  const files = [];
+  for (const row of result.rows) {
+    const cosigners = await getCosigners(String(row.id), delegationNames);
+    files.push(
+      toFile(
+        {
+          ...row,
+          delegation_name: row.delegation_id ? delegationNames.get(String(row.delegation_id)) ?? null : null
+        },
+        cosigners,
+        myMembership,
+        user.role === "chair"
+      )
+    );
+  }
+  return files;
 }
 async function createFile(user, input) {
   const db = getDb();
   const id = createId("file");
   await db.execute({
     sql: `INSERT INTO files
-          (id, conference_id, title, filename, mime, size, file_type, scope, delegation_id, co_sign, data, submitted_by, submitted_at, read)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+          (id, conference_id, title, filename, mime, size, file_type_id, file_type,
+           text_content, scope, delegation_id, co_sign, data, submitted_by, submitted_at, read)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     args: [
       id,
       user.conferenceId,
@@ -12506,7 +12715,9 @@ async function createFile(user, input) {
       input.filename,
       input.mime,
       input.size,
+      input.fileTypeId,
       input.fileType,
+      input.textContent,
       input.scope,
       input.delegationId,
       input.coSign ? 1 : 0,
@@ -12515,10 +12726,22 @@ async function createFile(user, input) {
       Date.now()
     ]
   });
+  for (const delegationId of input.cosignerDelegationIds) {
+    await db.execute({
+      sql: `INSERT OR IGNORE INTO file_cosigners
+            (file_id, conference_id, delegation_id, confirmed_at, confirmed_by)
+            VALUES (?, ?, ?, NULL, NULL)`,
+      args: [id, user.conferenceId, delegationId]
+    });
+  }
   return id;
 }
 async function getFileForDownload(user, fileId) {
   const db = getDb();
+  const meeting = await loadMeeting(user.conferenceId);
+  const delegationNames = new Map(
+    meeting.state.delegations.map((delegation) => [delegation.id, delegation.name])
+  );
   const result = await db.execute({
     sql: `SELECT f.*, a.name AS submitted_name
           FROM files f LEFT JOIN accounts a ON a.id = f.submitted_by
@@ -12527,21 +12750,50 @@ async function getFileForDownload(user, fileId) {
   });
   const row = result.rows[0];
   if (!row) return null;
-  const file = toFile(row);
-  if (user.role !== "chair" && file.submittedById !== user.id) {
-    const delegationId = await getMyDelegationId(user);
-    if (file.scope !== "DELEGATION" || !delegationId || file.delegationId !== delegationId) {
-      return null;
-    }
-  }
+  const myMembership = await getMyMembershipInfo(user);
+  const allowed = user.role === "chair" || String(row.submitted_by) === user.id || String(row.scope) === "DELEGATION" && (String(row.delegation_id) === myMembership?.delegationId || Boolean(
+    myMembership && (await db.execute({
+      sql: "SELECT 1 AS ok FROM file_cosigners WHERE file_id = ? AND delegation_id = ? LIMIT 1",
+      args: [fileId, myMembership.delegationId]
+    })).rows.length
+  ));
+  if (!allowed) return null;
+  const cosigners = await getCosigners(fileId, delegationNames);
+  const file = toFile(
+    {
+      ...row,
+      delegation_name: row.delegation_id ? delegationNames.get(String(row.delegation_id)) ?? null : null
+    },
+    cosigners,
+    myMembership,
+    user.role === "chair"
+  );
   const dataResult = await db.execute({
     sql: "SELECT data FROM files WHERE id = ? AND conference_id = ? LIMIT 1",
     args: [fileId, user.conferenceId]
   });
   const data = dataResult.rows[0]?.data;
-  if (!data) return null;
+  if (!data) return { file, bytes: new Uint8Array() };
   const bytes = data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(Buffer.from(String(data), "base64"));
   return { file, bytes };
+}
+async function confirmFile(user, fileId) {
+  const membership = await getMyMembershipInfo(user);
+  if (!membership?.isHead) return false;
+  const db = getDb();
+  const row = await db.execute({
+    sql: `SELECT 1 AS ok FROM file_cosigners
+          WHERE file_id = ? AND conference_id = ? AND delegation_id = ?
+          LIMIT 1`,
+    args: [fileId, user.conferenceId, membership.delegationId]
+  });
+  if (row.rows.length === 0) return false;
+  await db.execute({
+    sql: `UPDATE file_cosigners SET confirmed_at = ?, confirmed_by = ?
+          WHERE file_id = ? AND delegation_id = ?`,
+    args: [Date.now(), user.id, fileId, membership.delegationId]
+  });
+  return true;
 }
 async function setFileRead(user, fileId, read) {
   if (user.role !== "chair") return false;
@@ -12556,6 +12808,23 @@ async function setFileRead(user, fileId, read) {
     args: [read ? 1 : 0, fileId, user.conferenceId]
   });
   return true;
+}
+async function getCosignerHeadAccountIds(user, delegationIds) {
+  if (delegationIds.length === 0) return [];
+  const meeting = await loadMeeting(user.conferenceId);
+  const headSeatIds = /* @__PURE__ */ new Map();
+  for (const delegation of meeting.state.delegations) {
+    if (delegation.headSeatId) headSeatIds.set(delegation.id, delegation.headSeatId);
+  }
+  const seats = delegationIds.map((id) => headSeatIds.get(id)).filter((id) => Boolean(id));
+  if (seats.length === 0) return [];
+  const placeholders = seats.map(() => "?").join(",");
+  const result = await getDb().execute({
+    sql: `SELECT account_id FROM conference_members
+          WHERE conference_id = ? AND seat_id IN (${placeholders})`,
+    args: [user.conferenceId, ...seats]
+  });
+  return result.rows.map((row) => String(row.account_id));
 }
 
 // server/api/conferences.ts
@@ -12673,7 +12942,8 @@ function trimmedState(state, included) {
     currentTopicId: has("sessions") ? state.currentTopicId : null,
     resolutions: has("sessions") ? state.resolutions : [],
     motionTypes: has("motions") ? state.motionTypes : createInitialState().motionTypes,
-    activeMotion: has("motions") ? state.activeMotion : null
+    activeMotion: has("motions") ? state.activeMotion : null,
+    fileTypes: has("files") ? state.fileTypes : createInitialState().fileTypes
   };
 }
 async function listArchives(conferenceId) {
@@ -12706,7 +12976,7 @@ async function createArchive(conferenceId, nameRaw, includedRaw) {
   const db = getDb();
   const included = normalizeCategories(includedRaw);
   const has = (id2) => included.includes(id2);
-  const [meeting, conference, time, members, events, recipients, reads, files] = await Promise.all([
+  const [meeting, conference, time, members, events, recipients, reads, attachments, files, fileCosigners] = await Promise.all([
     loadMeeting(conferenceId),
     db.execute({
       sql: "SELECT id, name FROM conferences WHERE id = ? LIMIT 1",
@@ -12740,8 +13010,18 @@ async function createArchive(conferenceId, nameRaw, includedRaw) {
                   WHERE e.conference_id = ?`,
       args: [conferenceId]
     }) : Promise.resolve({ rows: [] }),
+    has("events") ? db.execute({
+      sql: `SELECT a.* FROM event_attachments a
+                  JOIN events e ON e.id = a.event_id
+                  WHERE e.conference_id = ?`,
+      args: [conferenceId]
+    }) : Promise.resolve({ rows: [] }),
     has("files") ? db.execute({
       sql: "SELECT * FROM files WHERE conference_id = ? ORDER BY submitted_at ASC",
+      args: [conferenceId]
+    }) : Promise.resolve({ rows: [] }),
+    has("files") ? db.execute({
+      sql: "SELECT * FROM file_cosigners WHERE conference_id = ?",
       args: [conferenceId]
     }) : Promise.resolve({ rows: [] })
   ]);
@@ -12784,12 +13064,22 @@ async function createArchive(conferenceId, nameRaw, includedRaw) {
       content: String(row.content),
       eventTime: Number(row.event_time),
       isCrisis: Number(row.is_crisis) === 1,
+      isRealtime: Number(row.is_realtime ?? 0) === 1,
       visibility: String(row.visibility ?? "SECRET"),
       publishedAt: row.published_at === null ? null : Number(row.published_at),
       createdAt: Number(row.created_at),
       createdBy: String(row.created_by),
       recipients: recipientRows.filter((item) => item.eventId === String(row.id)).map((item) => ({ accountId: item.accountId, read: item.read })),
-      reads: readRows.filter((item) => item.eventId === String(row.id)).map((item) => ({ accountId: item.accountId, read: item.read }))
+      reads: readRows.filter((item) => item.eventId === String(row.id)).map((item) => ({ accountId: item.accountId, read: item.read })),
+      attachment: (() => {
+        const att = attachments.rows.find((item) => String(item.event_id) === String(row.id));
+        return att ? {
+          filename: String(att.filename),
+          mime: String(att.mime),
+          size: Number(att.size),
+          data: bytesToBase64(att.data)
+        } : null;
+      })()
     })),
     files: files.rows.map((row) => ({
       id: String(row.id),
@@ -12801,6 +13091,11 @@ async function createArchive(conferenceId, nameRaw, includedRaw) {
       scope: String(row.scope ?? "DELEGATION"),
       delegationId: row.delegation_id ? String(row.delegation_id) : null,
       coSign: Number(row.co_sign ?? 0) === 1,
+      cosigners: fileCosigners.rows.filter((item) => String(item.file_id) === String(row.id)).map((item) => ({
+        delegationId: String(item.delegation_id),
+        confirmedAt: item.confirmed_at === null ? null : Number(item.confirmed_at),
+        confirmedBy: item.confirmed_by ? String(item.confirmed_by) : null
+      })),
       data: bytesToBase64(row.data),
       submittedBy: String(row.submitted_by),
       submittedAt: Number(row.submitted_at),
@@ -12857,6 +13152,7 @@ async function restoreArchive(conferenceId, id) {
       motionTypes: archivedState.motionTypes,
       activeMotion: archivedState.activeMotion
     } : {},
+    ...has("files") ? { fileTypes: archivedState.fileTypes } : {},
     updatedAt: Date.now()
   };
   const revision = current.revision + 1;
@@ -12897,6 +13193,10 @@ async function restoreArchive(conferenceId, id) {
   if (has("events")) {
     statements.push(
       {
+        sql: "DELETE FROM event_attachments WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)",
+        args: [conferenceId]
+      },
+      {
         sql: "DELETE FROM event_recipients WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)",
         args: [conferenceId]
       },
@@ -12909,8 +13209,8 @@ async function restoreArchive(conferenceId, id) {
     for (const event of data.events) {
       statements.push({
         sql: `INSERT INTO events
-              (id, conference_id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, conference_id, title, content, event_time, is_crisis, is_realtime, visibility, published_at, created_at, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           event.id,
           conferenceId,
@@ -12918,6 +13218,7 @@ async function restoreArchive(conferenceId, id) {
           event.content,
           event.eventTime,
           event.isCrisis ? 1 : 0,
+          event.isRealtime ? 1 : 0,
           event.visibility,
           event.publishedAt,
           event.createdAt,
@@ -12936,9 +13237,29 @@ async function restoreArchive(conferenceId, id) {
           args: [event.id, read.accountId, read.read ? 1 : 0]
         });
       }
+      if (event.attachment) {
+        statements.push({
+          sql: `INSERT INTO event_attachments
+                (id, event_id, conference_id, filename, mime, size, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            createId("att"),
+            event.id,
+            conferenceId,
+            event.attachment.filename,
+            event.attachment.mime,
+            event.attachment.size,
+            base64ToBytes(event.attachment.data)
+          ]
+        });
+      }
     }
   }
   if (has("files")) {
+    statements.push({
+      sql: "DELETE FROM file_cosigners WHERE conference_id = ?",
+      args: [conferenceId]
+    });
     statements.push({
       sql: "DELETE FROM files WHERE conference_id = ?",
       args: [conferenceId]
@@ -12965,6 +13286,20 @@ async function restoreArchive(conferenceId, id) {
           file.read ? 1 : 0
         ]
       });
+      for (const cosigner of file.cosigners ?? []) {
+        statements.push({
+          sql: `INSERT INTO file_cosigners
+                (file_id, conference_id, delegation_id, confirmed_at, confirmed_by)
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [
+            file.id,
+            conferenceId,
+            cosigner.delegationId,
+            cosigner.confirmedAt,
+            cosigner.confirmedBy
+          ]
+        });
+      }
     }
   }
   if (has("accounts")) {
@@ -13048,6 +13383,9 @@ async function clearConferenceData(conferenceId, currentAccountId, includedRaw) 
       activeMotion: null
     };
   }
+  if (has("files")) {
+    nextState = { ...nextState, fileTypes: defaultFileTypes() };
+  }
   nextState = { ...nextState, updatedAt: now };
   const statements = [
     {
@@ -13083,6 +13421,10 @@ async function clearConferenceData(conferenceId, currentAccountId, includedRaw) 
   if (has("events")) {
     statements.push(
       {
+        sql: "DELETE FROM event_attachments WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)",
+        args: [conferenceId]
+      },
+      {
         sql: "DELETE FROM event_recipients WHERE event_id IN (SELECT id FROM events WHERE conference_id = ?)",
         args: [conferenceId]
       },
@@ -13094,10 +13436,10 @@ async function clearConferenceData(conferenceId, currentAccountId, includedRaw) 
     );
   }
   if (has("files")) {
-    statements.push({
-      sql: "DELETE FROM files WHERE conference_id = ?",
-      args: [conferenceId]
-    });
+    statements.push(
+      { sql: "DELETE FROM file_cosigners WHERE conference_id = ?", args: [conferenceId] },
+      { sql: "DELETE FROM files WHERE conference_id = ?", args: [conferenceId] }
+    );
   }
   if (has("accounts")) {
     const members = await db.execute({
@@ -13226,6 +13568,9 @@ var ALLOWED_ACTIONS = /* @__PURE__ */ new Set([
   "motionType/delete",
   "motion/start",
   "motion/end",
+  "fileType/add",
+  "fileType/update",
+  "fileType/delete",
   "settings/patch",
   "state/replace",
   "state/reset"
@@ -13317,12 +13662,13 @@ async function validateEventInput(conferenceId, body, currentTime) {
   const title = text(body.title, 80);
   const content = text(body.content, 8e3);
   if (!title) throw new HTTPException(400, { message: "\u4E8B\u4EF6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
+  const isRealtime = body.isRealtime === true;
   const eventTimeRaw = Number(body.eventTime);
-  const eventTime = Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 864e13 ? Math.round(eventTimeRaw) : currentTime;
+  const eventTime = isRealtime ? currentTime : Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 864e13 ? Math.round(eventTimeRaw) : currentTime;
   const isCrisis = body.isCrisis === true;
   const visibility = isCrisis ? "PUBLIC" : body.visibility === "PUBLIC" ? "PUBLIC" : "SECRET";
   const recipientIds = visibility === "SECRET" ? await validateRecipients(conferenceId, body.recipientIds) : [];
-  return { title, content, eventTime, isCrisis, visibility, recipientIds };
+  return { title, content, eventTime, isCrisis, isRealtime, visibility, recipientIds };
 }
 app.post("/api/auth/login", async (c) => {
   const body = await readJson(c);
@@ -13461,6 +13807,44 @@ app.post("/api/events/:id/read", async (c) => {
   if (!ok) throw new HTTPException(404, { message: "\u6CA1\u6709\u627E\u5230\u8BE5\u4E8B\u4EF6" });
   return c.json({ ok: true });
 });
+app.post("/api/events/:id/attachment", async (c) => {
+  const user = await requireChair(c);
+  let form;
+  try {
+    form = await c.req.formData();
+  } catch {
+    throw new HTTPException(400, { message: "\u9644\u4EF6\u683C\u5F0F\u9519\u8BEF" });
+  }
+  const file = form.get("file");
+  if (!file || typeof file === "string" || !("arrayBuffer" in file)) {
+    throw new HTTPException(400, { message: "\u8BF7\u9009\u62E9\u9644\u4EF6" });
+  }
+  const actual = file;
+  if (actual.size <= 0 || actual.size > 2 * 1024 * 1024) {
+    throw new HTTPException(400, { message: "\u9644\u4EF6\u9700\u5728 2 MB \u4EE5\u5185" });
+  }
+  const ok = await setEventAttachment(user, c.req.param("id"), {
+    filename: actual.name,
+    mime: actual.type || "application/octet-stream",
+    size: actual.size,
+    bytes: new Uint8Array(await actual.arrayBuffer())
+  });
+  if (!ok) throw new HTTPException(404, { message: "\u4E8B\u4EF6\u4E0D\u5B58\u5728" });
+  return c.json({ ok: true });
+});
+app.get("/api/events/:id/attachment", async (c) => {
+  const user = await requireUser(c);
+  const found = await getEventAttachmentForDownload(user, c.req.param("id"));
+  if (!found) throw new HTTPException(404, { message: "\u9644\u4EF6\u4E0D\u5B58\u5728\u6216\u65E0\u6743\u4E0B\u8F7D" });
+  return new Response(new Blob([found.bytes], { type: found.mime }), {
+    headers: {
+      "Content-Type": found.mime,
+      "Content-Length": String(found.bytes.length),
+      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.filename)}`,
+      "Cache-Control": "private, no-store"
+    }
+  });
+});
 var MAX_FILE_SIZE = 2 * 1024 * 1024;
 app.post("/api/files", async (c) => {
   const user = await requireUser(c);
@@ -13470,19 +13854,20 @@ app.post("/api/files", async (c) => {
   } catch {
     throw new HTTPException(400, { message: "\u6587\u4EF6\u4E0A\u4F20\u683C\u5F0F\u9519\u8BEF" });
   }
-  const file = form.get("file");
-  if (!file || typeof file === "string" || !("arrayBuffer" in file)) {
-    throw new HTTPException(400, { message: "\u8BF7\u9009\u62E9\u8981\u63D0\u4EA4\u7684\u6587\u4EF6" });
-  }
-  const actual = file;
-  if (actual.size <= 0) throw new HTTPException(400, { message: "\u6587\u4EF6\u4E3A\u7A7A" });
-  if (actual.size > MAX_FILE_SIZE) {
+  const filePart = form.get("file");
+  const actual = filePart && typeof filePart !== "string" && "arrayBuffer" in filePart ? filePart : null;
+  if (actual && actual.size > MAX_FILE_SIZE) {
     throw new HTTPException(400, { message: "\u6587\u4EF6\u4E0D\u80FD\u8D85\u8FC7 2 MB" });
   }
-  const title = text(form.get("title"), 80) || actual.name;
+  const textContent = text(form.get("text"), 2e4);
+  if (!actual && !textContent) {
+    throw new HTTPException(400, { message: "\u8BF7\u9009\u62E9\u6587\u4EF6\u6216\u586B\u5199\u6587\u5B57\u5185\u5BB9" });
+  }
   const meeting = await loadMeeting(user.conferenceId);
   const scope = String(form.get("scope") ?? "") === "PERSONAL" ? "PERSONAL" : "DELEGATION";
-  const fileType = normalizeFileType(form.get("type"));
+  const typeId = text(form.get("typeId"), 100);
+  const fileType = meeting.state.fileTypes.find((item) => item.id === typeId) ?? meeting.state.fileTypes[0];
+  if (!fileType) throw new HTTPException(400, { message: "\u6587\u4EF6\u7C7B\u578B\u4E0D\u5B58\u5728" });
   const membership = await getMyMembership(user);
   let delegationId = null;
   if (user.role === "chair") {
@@ -13501,22 +13886,65 @@ app.post("/api/files", async (c) => {
       throw new HTTPException(403, { message: "\u53EA\u6709\u9601\u9996\u53EF\u4EE5\u63D0\u4EA4\u4EE3\u8868\u56E2\u6587\u4EF6" });
     }
     delegationId = delegation.id;
-  } else if (!meeting.state.settings.allowPersonalFiles) {
-    throw new HTTPException(403, { message: "\u4E3B\u5E2D\u56E2\u5C1A\u672A\u5F00\u653E\u4E2A\u4EBA\u6587\u4EF6\u6743\u9650" });
   }
-  const coSign = scope === "DELEGATION" && form.get("coSign") === "true";
-  const bytes = new Uint8Array(await actual.arrayBuffer());
+  if (scope === "PERSONAL") {
+    if (!fileType.allowPersonal) {
+      throw new HTTPException(403, { message: "\u8BE5\u6587\u4EF6\u7C7B\u578B\u4E0D\u5141\u8BB8\u4E2A\u4EBA\u53D1\u9001" });
+    }
+    if (user.role !== "chair" && !meeting.state.settings.allowPersonalFiles) {
+      throw new HTTPException(403, { message: "\u4E3B\u5E2D\u56E2\u5C1A\u672A\u5F00\u653E\u4E2A\u4EBA\u6587\u4EF6\u6743\u9650" });
+    }
+  }
+  let cosignerDelegationIds = [];
+  if (scope === "DELEGATION") {
+    const raw2 = form.get("cosigners");
+    if (typeof raw2 === "string" && raw2) {
+      try {
+        const parsed = JSON.parse(raw2);
+        if (Array.isArray(parsed)) {
+          const valid = new Set(meeting.state.delegations.map((item) => item.id));
+          cosignerDelegationIds = [
+            ...new Set(
+              parsed.filter(
+                (item) => typeof item === "string" && item !== delegationId && valid.has(item)
+              )
+            )
+          ];
+        }
+      } catch {
+        cosignerDelegationIds = [];
+      }
+    }
+    if (fileType.forceCoSign && cosignerDelegationIds.length === 0) {
+      throw new HTTPException(400, { message: "\u8BE5\u6587\u4EF6\u7C7B\u578B\u5FC5\u987B\u9009\u62E9\u8054\u7F72\u56FD\u5BB6" });
+    }
+  }
+  const coSign = scope === "DELEGATION" && (fileType.forceCoSign || form.get("coSign") === "true") && cosignerDelegationIds.length > 0;
+  const title = text(form.get("title"), 80) || actual?.name || "\u6587\u5B57\u6587\u4EF6";
+  const bytes = actual ? new Uint8Array(await actual.arrayBuffer()) : new Uint8Array();
   await createFile(user, {
     title,
-    filename: actual.name.slice(0, 200),
-    mime: actual.type || "application/octet-stream",
-    size: actual.size,
-    fileType,
+    filename: (actual?.name ?? "\u6587\u5B57\u5185\u5BB9").slice(0, 200),
+    mime: actual?.type || "text/plain",
+    size: actual?.size ?? 0,
+    fileTypeId: fileType.id,
+    fileType: fileType.name,
+    textContent,
     scope,
     delegationId,
     coSign,
+    cosignerDelegationIds: coSign ? cosignerDelegationIds : [],
     bytes
   });
+  if (coSign) {
+    const heads = await getCosignerHeadAccountIds(user, cosignerDelegationIds);
+    await sendPushToAccounts(heads, {
+      title: `\u8054\u7F72\u6587\u4EF6\u5F85\u786E\u8BA4\uFF1A${title}`,
+      body: "\u8BF7\u6253\u5F00\u4F1A\u573A\u6587\u4EF6\u9875\u9605\u8BFB\u5E76\u786E\u8BA4\u8054\u7F72\u3002",
+      url: "/#/files",
+      tag: `mun-file-${title}`
+    });
+  }
   return c.json({ ok: true });
 });
 app.get("/api/files/:id/download", async (c) => {
@@ -13541,6 +13969,41 @@ app.post("/api/files/:id/read", async (c) => {
   const body = await readJson(c);
   const ok = await setFileRead(user, c.req.param("id"), body.read === true);
   if (!ok) throw new HTTPException(404, { message: "\u6587\u4EF6\u4E0D\u5B58\u5728" });
+  return c.json({ ok: true });
+});
+app.post("/api/files/:id/forward", async (c) => {
+  const user = await requireChair(c);
+  const found = await getFileForDownload(user, c.req.param("id"));
+  if (!found) throw new HTTPException(404, { message: "\u6587\u4EF6\u4E0D\u5B58\u5728" });
+  const meeting = await loadMeeting(user.conferenceId);
+  const fileType = meeting.state.fileTypes.find((item) => item.id === found.file.fileTypeId) ?? meeting.state.fileTypes.find((item) => item.name === found.file.fileType);
+  if (!fileType?.allowPublic) {
+    throw new HTTPException(403, { message: "\u8BE5\u6587\u4EF6\u7C7B\u578B\u4E0D\u5141\u8BB8\u516C\u5F00\u8F6C\u53D1" });
+  }
+  const current = await getTimeState(user.conferenceId);
+  const id = await createEvent(user, {
+    title: found.file.title,
+    content: found.file.textContent || `\u4E3B\u5E2D\u56E2\u8F6C\u53D1\u4E86\u6587\u4EF6\uFF1A${found.file.title}`,
+    eventTime: current.currentMs,
+    isCrisis: false,
+    isRealtime: true,
+    visibility: "PUBLIC",
+    recipientIds: []
+  });
+  if (found.bytes.length > 0) {
+    await setEventAttachment(user, id, {
+      filename: found.file.filename,
+      mime: found.file.mime,
+      size: found.file.size,
+      bytes: found.bytes
+    });
+  }
+  return c.json({ id });
+});
+app.post("/api/files/:id/confirm", async (c) => {
+  const user = await requireUser(c);
+  const ok = await confirmFile(user, c.req.param("id"));
+  if (!ok) throw new HTTPException(403, { message: "\u53EA\u6709\u8054\u7F72\u4EE3\u8868\u56E2\u7684\u9601\u9996\u53EF\u4EE5\u786E\u8BA4" });
   return c.json({ ok: true });
 });
 app.post("/api/accounts", async (c) => {

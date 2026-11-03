@@ -18,6 +18,7 @@ export interface EventInput {
   content: string
   eventTime: number
   isCrisis: boolean
+  isRealtime: boolean
   visibility: EventVisibility
   recipientIds: string[]
 }
@@ -29,6 +30,7 @@ interface EventRow {
   content: string
   event_time: number
   is_crisis: number
+  is_realtime: number
   visibility: string
   published_at: number | null
   created_at: number
@@ -43,6 +45,7 @@ function toEventRow(row: Record<string, unknown>): EventRow {
     content: String(row.content),
     event_time: Number(row.event_time),
     is_crisis: Number(row.is_crisis),
+    is_realtime: Number(row.is_realtime ?? 0),
     visibility: row.visibility === 'PUBLIC' ? 'PUBLIC' : 'SECRET',
     published_at: row.published_at === null ? null : Number(row.published_at),
     created_at: Number(row.created_at),
@@ -141,11 +144,29 @@ function baseEvent(
     content: row.content,
     eventTime: row.event_time,
     isCrisis: row.is_crisis === 1,
+    isRealtime: row.is_realtime === 1,
+    attachment: null,
     visibility: row.visibility === 'PUBLIC' ? 'PUBLIC' : 'SECRET',
     publishedAt: row.published_at,
     createdAt: row.created_at,
     createdBy: row.created_by,
   }
+}
+
+async function getAttachment(eventId: string) {
+  const result = await getDb().execute({
+    sql: 'SELECT id, filename, mime, size FROM event_attachments WHERE event_id = ? LIMIT 1',
+    args: [eventId],
+  })
+  const row = result.rows[0]
+  return row
+    ? {
+        id: String(row.id),
+        filename: String(row.filename),
+        mime: String(row.mime),
+        size: Number(row.size),
+      }
+    : null
 }
 
 export async function listEventsForChair(
@@ -169,6 +190,7 @@ export async function listEventsForChair(
       : recipients.filter((item) => item.read).length
     events.push({
       ...baseEvent(row),
+      attachment: await getAttachment(row.id),
       recipients,
       inAudience,
       read,
@@ -200,17 +222,20 @@ export async function listEventsForDelegate(
     args: [user.id, conferenceId, user.id],
   })
 
-  return result.rows.map((raw) => {
+  const events: CouncilEvent[] = []
+  for (const raw of result.rows) {
     const row = toEventRow(raw)
-    return {
+    events.push({
       ...baseEvent(row),
+      attachment: await getAttachment(row.id),
       recipients: [],
       inAudience: true,
       read: Number(raw.my_read) === 1,
       readCount: Number(raw.my_read) === 1 ? 1 : 0,
       recipientCount: 0,
-    }
-  })
+    })
+  }
+  return events
 }
 
 export async function listEvents(user: SessionUser): Promise<CouncilEvent[]> {
@@ -240,6 +265,7 @@ export async function getEventForChair(
   const totalAccounts = publicEvent ? await countAccounts(user.conferenceId) : recipients.length
   return {
     ...baseEvent(row),
+    attachment: await getAttachment(row.id),
     recipients,
     inAudience,
     read,
@@ -272,8 +298,8 @@ export async function createEvent(
   const visibility: EventVisibility = input.isCrisis ? 'PUBLIC' : input.visibility
   await db.execute({
     sql: `INSERT INTO events
-          (id, conference_id, title, content, event_time, is_crisis, visibility, published_at, created_at, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          (id, conference_id, title, content, event_time, is_crisis, is_realtime, visibility, published_at, created_at, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     args: [
       id,
       user.conferenceId,
@@ -281,6 +307,7 @@ export async function createEvent(
       input.content,
       input.eventTime,
       input.isCrisis ? 1 : 0,
+      input.isRealtime ? 1 : 0,
       visibility,
       createdAt,
       user.id,
@@ -317,6 +344,7 @@ export async function updateEvent(
       input.content,
       row.published_at ? row.event_time : input.eventTime,
       input.isCrisis ? 1 : 0,
+      input.isRealtime ? 1 : 0,
       visibility,
       eventId,
       user.conferenceId,
@@ -351,6 +379,7 @@ export async function deleteEvent(
   if (existing.rows.length === 0) return false
   await db.execute({ sql: 'DELETE FROM event_recipients WHERE event_id = ?', args: [eventId] })
   await db.execute({ sql: 'DELETE FROM event_reads WHERE event_id = ?', args: [eventId] })
+  await db.execute({ sql: 'DELETE FROM event_attachments WHERE event_id = ?', args: [eventId] })
   await db.execute({ sql: 'DELETE FROM events WHERE id = ?', args: [eventId] })
   await clearCrisisPause(user.conferenceId, eventId)
   return true
@@ -384,4 +413,69 @@ export async function setEventRead(
     })
   }
   return true
+}
+
+export async function setEventAttachment(
+  user: SessionUser,
+  eventId: string,
+  input: { filename: string; mime: string; size: number; bytes: Uint8Array },
+): Promise<boolean> {
+  if (user.role !== 'chair') return false
+  const db = getDb()
+  const event = await db.execute({
+    sql: 'SELECT id FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
+  })
+  if (event.rows.length === 0) return false
+  await db.execute({
+    sql: 'DELETE FROM event_attachments WHERE event_id = ?',
+    args: [eventId],
+  })
+  await db.execute({
+    sql: `INSERT INTO event_attachments
+          (id, event_id, conference_id, filename, mime, size, data)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      createId('att'),
+      eventId,
+      user.conferenceId,
+      input.filename.slice(0, 200),
+      input.mime,
+      input.size,
+      input.bytes,
+    ],
+  })
+  return true
+}
+
+export async function getEventAttachmentForDownload(
+  user: SessionUser,
+  eventId: string,
+): Promise<{ filename: string; mime: string; bytes: Uint8Array } | null> {
+  const db = getDb()
+  const event = await db.execute({
+    sql: 'SELECT visibility, published_at FROM events WHERE id = ? AND conference_id = ? LIMIT 1',
+    args: [eventId, user.conferenceId],
+  })
+  const eventRow = event.rows[0]
+  if (!eventRow) return null
+  if (user.role !== 'chair') {
+    if (eventRow.published_at === null) return null
+    const publicEvent = eventRow.visibility === 'PUBLIC'
+    if (!publicEvent && !(await isRecipient(eventId, user.id))) return null
+  }
+  const result = await db.execute({
+    sql: 'SELECT filename, mime, data FROM event_attachments WHERE event_id = ? LIMIT 1',
+    args: [eventId],
+  })
+  const row = result.rows[0]
+  if (!row) return null
+  const data = row.data
+  const bytes =
+    data instanceof Uint8Array
+      ? data
+      : data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(Buffer.from(String(data), 'base64'))
+  return { filename: String(row.filename), mime: String(row.mime), bytes }
 }

@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import type { Action } from '../../src/state/reducer.ts'
 import { createId } from '../../src/lib/id.ts'
-import { normalizeFileType } from '../../src/lib/fileTypes.ts'
+
 import type { AccountInfo, EventVisibility } from '../../src/types.ts'
 import { hashPassword } from './password.ts'
 import {
@@ -19,6 +19,8 @@ import { ensureDb, getDb } from './db.ts'
 import {
   createEvent,
   deleteEvent,
+  getEventAttachmentForDownload,
+  setEventAttachment,
   listEvents,
   publishAllDueEvents,
   publishDueEvents,
@@ -27,11 +29,14 @@ import {
   type EventInput,
 } from './events.ts'
 import {
+  confirmFile,
   createFile,
+  getCosignerHeadAccountIds,
   getFileForDownload,
   listFiles,
   setFileRead,
 } from './files.ts'
+import { sendPushToAccounts } from './push.ts'
 import { applyConferenceAction, loadMeeting } from './meeting.ts'
 import {
   clearCrisisPause,
@@ -140,6 +145,9 @@ const ALLOWED_ACTIONS = new Set([
   'motionType/delete',
   'motion/start',
   'motion/end',
+  'fileType/add',
+  'fileType/update',
+  'fileType/delete',
   'settings/patch',
   'state/replace',
   'state/reset',
@@ -247,9 +255,11 @@ async function validateEventInput(
   const content = text(body.content, 8000)
   if (!title) throw new HTTPException(400, { message: '事件标题不能为空' })
 
+  const isRealtime = body.isRealtime === true
   const eventTimeRaw = Number(body.eventTime)
-  const eventTime =
-    Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 8.64e15
+  const eventTime = isRealtime
+    ? currentTime
+    : Number.isFinite(eventTimeRaw) && Math.abs(eventTimeRaw) <= 8.64e15
       ? Math.round(eventTimeRaw)
       : currentTime
 
@@ -264,7 +274,7 @@ async function validateEventInput(
       ? await validateRecipients(conferenceId, body.recipientIds)
       : []
 
-  return { title, content, eventTime, isCrisis, visibility, recipientIds }
+  return { title, content, eventTime, isCrisis, isRealtime, visibility, recipientIds }
 }
 
 /* ---------------- 认证 / 会场 ---------------- */
@@ -432,6 +442,46 @@ app.post('/api/events/:id/read', async (c) => {
   return c.json({ ok: true })
 })
 
+app.post('/api/events/:id/attachment', async (c) => {
+  const user = await requireChair(c)
+  let form: FormData
+  try {
+    form = await c.req.formData()
+  } catch {
+    throw new HTTPException(400, { message: '附件格式错误' })
+  }
+  const file = form.get('file')
+  if (!file || typeof file === 'string' || !('arrayBuffer' in file)) {
+    throw new HTTPException(400, { message: '请选择附件' })
+  }
+  const actual = file as File
+  if (actual.size <= 0 || actual.size > 2 * 1024 * 1024) {
+    throw new HTTPException(400, { message: '附件需在 2 MB 以内' })
+  }
+  const ok = await setEventAttachment(user, c.req.param('id'), {
+    filename: actual.name,
+    mime: actual.type || 'application/octet-stream',
+    size: actual.size,
+    bytes: new Uint8Array(await actual.arrayBuffer()),
+  })
+  if (!ok) throw new HTTPException(404, { message: '事件不存在' })
+  return c.json({ ok: true })
+})
+
+app.get('/api/events/:id/attachment', async (c) => {
+  const user = await requireUser(c)
+  const found = await getEventAttachmentForDownload(user, c.req.param('id'))
+  if (!found) throw new HTTPException(404, { message: '附件不存在或无权下载' })
+  return new Response(new Blob([found.bytes as unknown as BlobPart], { type: found.mime }), {
+    headers: {
+      'Content-Type': found.mime,
+      'Content-Length': String(found.bytes.length),
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(found.filename)}`,
+      'Cache-Control': 'private, no-store',
+    },
+  })
+})
+
 /* ---------------- 文件 ---------------- */
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024
@@ -445,21 +495,27 @@ app.post('/api/files', async (c) => {
     throw new HTTPException(400, { message: '文件上传格式错误' })
   }
 
-  const file = form.get('file')
-  if (!file || typeof file === 'string' || !('arrayBuffer' in file)) {
-    throw new HTTPException(400, { message: '请选择要提交的文件' })
-  }
-
-  const actual = file as File
-  if (actual.size <= 0) throw new HTTPException(400, { message: '文件为空' })
-  if (actual.size > MAX_FILE_SIZE) {
+  const filePart = form.get('file')
+  const actual =
+    filePart && typeof filePart !== 'string' && 'arrayBuffer' in filePart
+      ? (filePart as File)
+      : null
+  if (actual && actual.size > MAX_FILE_SIZE) {
     throw new HTTPException(400, { message: '文件不能超过 2 MB' })
   }
+  const textContent = text(form.get('text'), 20000)
+  if (!actual && !textContent) {
+    throw new HTTPException(400, { message: '请选择文件或填写文字内容' })
+  }
 
-  const title = text(form.get('title'), 80) || actual.name
   const meeting = await loadMeeting(user.conferenceId)
-  const scope = String(form.get('scope') ?? '') === 'PERSONAL' ? 'PERSONAL' : 'DELEGATION'
-  const fileType = normalizeFileType(form.get('type'))
+  const scope =
+    String(form.get('scope') ?? '') === 'PERSONAL' ? 'PERSONAL' : 'DELEGATION'
+  const typeId = text(form.get('typeId'), 100)
+  const fileType =
+    meeting.state.fileTypes.find((item) => item.id === typeId) ??
+    meeting.state.fileTypes[0]
+  if (!fileType) throw new HTTPException(400, { message: '文件类型不存在' })
   const membership = await getMyMembership(user)
   let delegationId: string | null = null
 
@@ -479,23 +535,76 @@ app.post('/api/files', async (c) => {
       throw new HTTPException(403, { message: '只有阁首可以提交代表团文件' })
     }
     delegationId = delegation.id
-  } else if (!meeting.state.settings.allowPersonalFiles) {
-    throw new HTTPException(403, { message: '主席团尚未开放个人文件权限' })
   }
 
-  const coSign = scope === 'DELEGATION' && form.get('coSign') === 'true'
-  const bytes = new Uint8Array(await actual.arrayBuffer())
+  if (scope === 'PERSONAL') {
+    if (!fileType.allowPersonal) {
+      throw new HTTPException(403, { message: '该文件类型不允许个人发送' })
+    }
+    if (user.role !== 'chair' && !meeting.state.settings.allowPersonalFiles) {
+      throw new HTTPException(403, { message: '主席团尚未开放个人文件权限' })
+    }
+  }
+
+  let cosignerDelegationIds: string[] = []
+  if (scope === 'DELEGATION') {
+    const raw = form.get('cosigners')
+    if (typeof raw === 'string' && raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          const valid = new Set(meeting.state.delegations.map((item) => item.id))
+          cosignerDelegationIds = [
+            ...new Set(
+              parsed.filter(
+                (item): item is string =>
+                  typeof item === 'string' &&
+                  item !== delegationId &&
+                  valid.has(item),
+              ),
+            ),
+          ]
+        }
+      } catch {
+        cosignerDelegationIds = []
+      }
+    }
+    if (fileType.forceCoSign && cosignerDelegationIds.length === 0) {
+      throw new HTTPException(400, { message: '该文件类型必须选择联署国家' })
+    }
+  }
+
+  const coSign =
+    scope === 'DELEGATION' &&
+    (fileType.forceCoSign || form.get('coSign') === 'true') &&
+    cosignerDelegationIds.length > 0
+  const title = text(form.get('title'), 80) || actual?.name || '文字文件'
+  const bytes = actual ? new Uint8Array(await actual.arrayBuffer()) : new Uint8Array()
   await createFile(user, {
     title,
-    filename: actual.name.slice(0, 200),
-    mime: actual.type || 'application/octet-stream',
-    size: actual.size,
-    fileType,
+    filename: (actual?.name ?? '文字内容').slice(0, 200),
+    mime: actual?.type || 'text/plain',
+    size: actual?.size ?? 0,
+    fileTypeId: fileType.id,
+    fileType: fileType.name,
+    textContent,
     scope,
     delegationId,
     coSign,
+    cosignerDelegationIds: coSign ? cosignerDelegationIds : [],
     bytes,
   })
+
+  if (coSign) {
+    const heads = await getCosignerHeadAccountIds(user, cosignerDelegationIds)
+    await sendPushToAccounts(heads, {
+      title: `联署文件待确认：${title}`,
+      body: '请打开会场文件页阅读并确认联署。',
+      url: '/#/files',
+      tag: `mun-file-${title}`,
+    })
+  }
+
   return c.json({ ok: true })
 })
 
@@ -522,6 +631,45 @@ app.post('/api/files/:id/read', async (c) => {
   const body = await readJson(c)
   const ok = await setFileRead(user, c.req.param('id'), body.read === true)
   if (!ok) throw new HTTPException(404, { message: '文件不存在' })
+  return c.json({ ok: true })
+})
+
+app.post('/api/files/:id/forward', async (c) => {
+  const user = await requireChair(c)
+  const found = await getFileForDownload(user, c.req.param('id'))
+  if (!found) throw new HTTPException(404, { message: '文件不存在' })
+  const meeting = await loadMeeting(user.conferenceId)
+  const fileType =
+    meeting.state.fileTypes.find((item) => item.id === found.file.fileTypeId) ??
+    meeting.state.fileTypes.find((item) => item.name === found.file.fileType)
+  if (!fileType?.allowPublic) {
+    throw new HTTPException(403, { message: '该文件类型不允许公开转发' })
+  }
+  const current = await getTimeState(user.conferenceId)
+  const id = await createEvent(user, {
+    title: found.file.title,
+    content: found.file.textContent || `主席团转发了文件：${found.file.title}`,
+    eventTime: current.currentMs,
+    isCrisis: false,
+    isRealtime: true,
+    visibility: 'PUBLIC',
+    recipientIds: [],
+  })
+  if (found.bytes.length > 0) {
+    await setEventAttachment(user, id, {
+      filename: found.file.filename,
+      mime: found.file.mime,
+      size: found.file.size,
+      bytes: found.bytes,
+    })
+  }
+  return c.json({ id })
+})
+
+app.post('/api/files/:id/confirm', async (c) => {
+  const user = await requireUser(c)
+  const ok = await confirmFile(user, c.req.param('id'))
+  if (!ok) throw new HTTPException(403, { message: '只有联署代表团的阁首可以确认' })
   return c.json({ ok: true })
 })
 
