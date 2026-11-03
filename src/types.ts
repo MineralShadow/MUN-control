@@ -106,6 +106,13 @@ export interface ActiveMotion {
   speakers: MotionSpeaker[]
   startedAt: number
   endedAt: number | null
+  /** 总时长计时：已累计毫秒 + 当前运行起点 */
+  totalElapsedMs: number
+  totalRunningSince: number | null
+  /** 单位时长计时：当前发言顺序索引（-1 表示尚未开始） */
+  unitIndex: number
+  unitElapsedMs: number
+  unitRunningSince: number | null
 }
 
 export interface Author {

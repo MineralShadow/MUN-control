@@ -218,6 +218,21 @@ function normalizeActiveMotion(value: unknown): ActiveMotion | null {
       name: asText(item.name).slice(0, 40),
     }))
     .filter((item) => item.delegationId)
+  const startedAt = toInt(value.startedAt, Date.now())
+  const endedAt = value.endedAt === null ? null : toInt(value.endedAt, 0) || null
+  const unitSeconds = clampInt(toInt(value.unitSeconds, 0), 0, 86400)
+  const unitIndexRaw = toInt(value.unitIndex, -1)
+  const unitIndex = unitIndexRaw >= 0 && unitIndexRaw < speakers.length ? unitIndexRaw : -1
+  const totalRunningSince =
+    endedAt !== null
+      ? null
+      : value.totalRunningSince === null
+        ? null
+        : typeof value.totalRunningSince === 'number'
+          ? value.totalRunningSince
+          : unitSeconds > 0
+            ? null
+            : startedAt
   return {
     id,
     typeId,
@@ -226,10 +241,20 @@ function normalizeActiveMotion(value: unknown): ActiveMotion | null {
     proposerName: asText(value.proposerName).slice(0, 40),
     topic: asText(value.topic).slice(0, 120),
     totalSeconds: clampInt(toInt(value.totalSeconds, 0), 0, 86400),
-    unitSeconds: clampInt(toInt(value.unitSeconds, 0), 0, 86400),
+    unitSeconds,
     speakers,
-    startedAt: toInt(value.startedAt, Date.now()),
-    endedAt: value.endedAt === null ? null : toInt(value.endedAt, 0) || null,
+    startedAt,
+    endedAt,
+    totalElapsedMs: clampInt(toInt(value.totalElapsedMs, 0), 0, 864000000),
+    totalRunningSince,
+    unitIndex,
+    unitElapsedMs: clampInt(toInt(value.unitElapsedMs, 0), 0, 864000000),
+    unitRunningSince:
+      endedAt !== null ||
+      value.unitRunningSince === null ||
+      typeof value.unitRunningSince !== 'number'
+        ? null
+        : value.unitRunningSince,
   }
 }
 

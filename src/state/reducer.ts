@@ -48,6 +48,9 @@ export type Action =
   | { type: 'motionType/update'; motionType: MotionType }
   | { type: 'motionType/delete'; id: string }
   | { type: 'motion/start'; motion: ActiveMotion }
+  | { type: 'motion/startUnit'; index: number; now: number }
+  | { type: 'motion/pause'; now: number }
+  | { type: 'motion/resume'; now: number }
   | { type: 'motion/end'; endedAt: number }
   | { type: 'fileType/add'; fileType: FileType }
   | { type: 'fileType/update'; fileType: FileType }
@@ -362,10 +365,98 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
     case 'motion/start':
       return { ...state, activeMotion: action.motion }
 
-    case 'motion/end':
-      return state.activeMotion
-        ? { ...state, activeMotion: { ...state.activeMotion, endedAt: action.endedAt } }
-        : state
+    case 'motion/startUnit': {
+      const motion = state.activeMotion
+      if (!motion || motion.endedAt !== null) return state
+      if (action.index < 0 || action.index >= motion.speakers.length) return state
+      return {
+        ...state,
+        activeMotion: {
+          ...motion,
+          unitIndex: action.index,
+          unitElapsedMs: 0,
+          unitRunningSince: action.now,
+        },
+      }
+    }
+
+    case 'motion/pause': {
+      const motion = state.activeMotion
+      if (!motion || motion.endedAt !== null) return state
+      if (motion.unitSeconds > 0) {
+        if (motion.unitRunningSince === null) return state
+        return {
+          ...state,
+          activeMotion: {
+            ...motion,
+            unitElapsedMs:
+              motion.unitElapsedMs + Math.max(0, action.now - motion.unitRunningSince),
+            unitRunningSince: null,
+          },
+        }
+      }
+      if (motion.totalRunningSince === null) return state
+      return {
+        ...state,
+        activeMotion: {
+          ...motion,
+          totalElapsedMs:
+            motion.totalElapsedMs + Math.max(0, action.now - motion.totalRunningSince),
+          totalRunningSince: null,
+        },
+      }
+    }
+
+    case 'motion/resume': {
+      const motion = state.activeMotion
+      if (!motion || motion.endedAt !== null) return state
+      if (motion.unitSeconds > 0) {
+        if (motion.unitIndex < 0 || motion.unitRunningSince !== null) return state
+        return {
+          ...state,
+          activeMotion: { ...motion, unitRunningSince: action.now },
+        }
+      }
+      if (motion.totalRunningSince !== null) return state
+      return {
+        ...state,
+        activeMotion: { ...motion, totalRunningSince: action.now },
+      }
+    }
+
+    case 'motion/end': {
+      const motion = state.activeMotion
+      if (!motion) return state
+      if (motion.endedAt !== null) return state
+      if (motion.unitSeconds > 0) {
+        return {
+          ...state,
+          activeMotion: {
+            ...motion,
+            unitElapsedMs:
+              motion.unitElapsedMs +
+              (motion.unitRunningSince === null
+                ? 0
+                : Math.max(0, action.endedAt - motion.unitRunningSince)),
+            unitRunningSince: null,
+            endedAt: action.endedAt,
+          },
+        }
+      }
+      return {
+        ...state,
+        activeMotion: {
+          ...motion,
+          totalElapsedMs:
+            motion.totalElapsedMs +
+            (motion.totalRunningSince === null
+              ? 0
+              : Math.max(0, action.endedAt - motion.totalRunningSince)),
+          totalRunningSince: null,
+          endedAt: action.endedAt,
+        },
+      }
+    }
 
     case 'fileType/add':
       return { ...state, fileTypes: [...state.fileTypes, action.fileType] }

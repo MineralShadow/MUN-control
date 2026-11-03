@@ -16,6 +16,11 @@ function formatDuration(seconds: number): string {
   return minutes > 0 ? `${minutes} 分 ${rest} 秒` : `${rest} 秒`
 }
 
+function timerElapsed(base: number, since: number | null, endedAt: number | null, now: number): number {
+  if (since === null) return base
+  return base + Math.max(0, (endedAt ?? now) - since)
+}
+
 export function MotionsPage() {
   const { state, dispatch, me } = useConference()
   const confirm = useConfirm()
@@ -48,10 +53,25 @@ export function MotionsPage() {
   }, [motionType])
 
   const motion = state.activeMotion
-  const elapsed = motion ? Math.max(0, ((motion.endedAt ?? now) - motion.startedAt) / 1000) : 0
-  const remaining = motion && motion.totalSeconds > 0
-    ? Math.max(0, motion.totalSeconds - elapsed)
+  const isUnitMotion = Boolean(motion && motion.unitSeconds > 0)
+  const totalElapsed = motion
+    ? timerElapsed(motion.totalElapsedMs, motion.totalRunningSince, motion.endedAt, now) / 1000
+    : 0
+  const unitElapsed = motion
+    ? timerElapsed(motion.unitElapsedMs, motion.unitRunningSince, motion.endedAt, now) / 1000
+    : 0
+  const totalRemaining = motion && motion.totalSeconds > 0
+    ? Math.max(0, motion.totalSeconds - totalElapsed)
     : null
+  const unitRemaining = motion && motion.unitSeconds > 0
+    ? Math.max(0, motion.unitSeconds - unitElapsed)
+    : null
+  const currentSpeaker =
+    motion && motion.unitIndex >= 0 ? motion.speakers[motion.unitIndex] : null
+  const nextUnitIndex = motion ? (motion.unitIndex < 0 ? 0 : motion.unitIndex + 1) : 0
+  const hasNextUnit = Boolean(
+    motion && motion.unitIndex < motion.speakers.length - 1 && nextUnitIndex < motion.speakers.length,
+  )
 
   function updateType(patch: Partial<MotionType>) {
     if (!motionType) return
@@ -102,6 +122,29 @@ export function MotionsPage() {
     )
   }
 
+  function moveSpeaker(id: string, direction: -1 | 1) {
+    setSpeakerIds((previous) => {
+      const index = previous.indexOf(id)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= previous.length) return previous
+      const next = [...previous]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
+  function pauseMotion() {
+    dispatch({ type: 'motion/pause', now: Date.now() })
+  }
+
+  function resumeMotion() {
+    dispatch({ type: 'motion/resume', now: Date.now() })
+  }
+
+  function startUnit(index: number) {
+    dispatch({ type: 'motion/startUnit', index, now: Date.now() })
+  }
+
   async function startMotion() {
     if (!motionType) {
       toast('请先选择动议类型', 'danger')
@@ -114,6 +157,10 @@ export function MotionsPage() {
     }
     if (motionType.hasTopic && !topic.trim()) {
       toast('请填写动议主题', 'danger')
+      return
+    }
+    if (motionType.hasUnitDuration && speakerIds.length === 0) {
+      toast('有单位时长的动议请按顺序选择发言代表团', 'danger')
       return
     }
     if (motion) {
@@ -132,10 +179,12 @@ export function MotionsPage() {
       ? Math.max(0, Math.round(Number(unitSeconds)))
       : 0
     const speakers = motionType.hasSpeakersList || motionType.hasUnitDuration
-      ? state.delegations
-          .filter((item) => speakerIds.includes(item.id))
-          .map((item) => ({ delegationId: item.id, name: item.name }))
+      ? speakerIds
+          .map((id) => state.delegations.find((item) => item.id === id))
+          .filter((item) => Boolean(item))
+          .map((item) => ({ delegationId: item!.id, name: item!.name }))
       : []
+    const startedAt = Date.now()
     const next: ActiveMotion = {
       id: createId('motion'),
       typeId: motionType.id,
@@ -146,8 +195,13 @@ export function MotionsPage() {
       totalSeconds,
       unitSeconds: unit,
       speakers,
-      startedAt: Date.now(),
+      startedAt,
       endedAt: null,
+      totalElapsedMs: 0,
+      totalRunningSince: unit > 0 ? null : startedAt,
+      unitIndex: -1,
+      unitElapsedMs: 0,
+      unitRunningSince: null,
     }
     dispatch({ type: 'motion/start', motion: next })
     toast('动议已开始', 'success')
@@ -180,7 +234,7 @@ export function MotionsPage() {
               <span>动议国：{motion.proposerName}</span>
               {motion.topic ? <span>主题：{motion.topic}</span> : null}
               {motion.totalSeconds > 0 ? (
-                <span>总时长：{formatDuration(motion.totalSeconds)}</span>
+                <span>总时长上限：{formatDuration(motion.totalSeconds)}</span>
               ) : null}
               {motion.unitSeconds > 0 ? (
                 <span>单位时长：{formatDuration(motion.unitSeconds)}</span>
@@ -189,13 +243,24 @@ export function MotionsPage() {
             </div>
             {motion.speakers.length > 0 ? (
               <div className="motion-speakers">
-                <strong>发言名单</strong>
-                <div>
-                  {motion.speakers.map((speaker) => (
-                    <span className="motion-speaker" key={speaker.delegationId}>
-                      {speaker.name}
-                    </span>
-                  ))}
+                <strong>发言顺序</strong>
+                <div className="motion-speaker-order">
+                  {motion.speakers.map((speaker, index) => {
+                    const status =
+                      motion.unitIndex < 0
+                        ? 'pending'
+                        : index < motion.unitIndex
+                          ? 'done'
+                          : index === motion.unitIndex
+                            ? 'current'
+                            : 'pending'
+                    return (
+                      <span className={`motion-speaker ${status}`} key={speaker.delegationId}>
+                        {index + 1}. {speaker.name}
+                        {status === 'current' ? ' · 当前' : status === 'done' ? ' · 已完成' : ''}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             ) : null}
@@ -204,21 +269,82 @@ export function MotionsPage() {
             <div className="motion-time">
               {motion.endedAt
                 ? '已结束'
-                : remaining !== null
-                  ? formatDuration(remaining)
-                  : formatDuration(elapsed)}
+                : isUnitMotion
+                  ? motion.unitIndex < 0
+                    ? '--:--'
+                    : unitRemaining !== null
+                      ? formatDuration(unitRemaining)
+                      : formatDuration(unitElapsed)
+                  : totalRemaining !== null
+                    ? formatDuration(totalRemaining)
+                    : formatDuration(totalElapsed)}
             </div>
             <div className="motion-clock-note">
               {motion.endedAt
                 ? '可以开始下一个动议'
-                : remaining !== null
-                  ? '剩余总时长'
-                  : '已进行时长'}
+                : isUnitMotion
+                  ? motion.unitIndex < 0
+                    ? '点击下方开始第 1 位发言'
+                    : `单位倒计时 · 第 ${motion.unitIndex + 1} 位${currentSpeaker ? ` · ${currentSpeaker.name}` : ''}`
+                  : totalRemaining !== null
+                    ? '剩余总时长'
+                    : '已进行时长'}
             </div>
             {canEdit && !motion.endedAt ? (
-              <button type="button" className="btn btn-danger" onClick={endMotion}>
-                结束动议
-              </button>
+              <div className="motion-clock-actions">
+                {isUnitMotion ? (
+                  motion.unitIndex < 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={motion.speakers.length === 0}
+                      onClick={() => startUnit(0)}
+                    >
+                      开始第 1 位发言
+                    </button>
+                  ) : (
+                    <>
+                      {motion.unitRunningSince !== null ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={pauseMotion}>
+                          暂停
+                        </button>
+                      ) : unitElapsed < motion.unitSeconds ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={resumeMotion}>
+                          继续
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => startUnit(motion.unitIndex)}
+                        >
+                          重开本单元
+                        </button>
+                      )}
+                      {hasNextUnit ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => startUnit(nextUnitIndex)}
+                        >
+                          下一位发言
+                        </button>
+                      ) : null}
+                    </>
+                  )
+                ) : motion.totalRunningSince !== null ? (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={pauseMotion}>
+                    暂停
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={resumeMotion}>
+                    继续
+                  </button>
+                )}
+                <button type="button" className="btn btn-danger btn-sm" onClick={endMotion}>
+                  结束动议
+                </button>
+              </div>
             ) : null}
           </div>
         </section>
@@ -307,27 +433,73 @@ export function MotionsPage() {
           {motionType?.hasSpeakersList || motionType?.hasUnitDuration ? (
             <div className="motion-speaker-picker">
               <div className="recipient-head">
-                <span>发言名单</span>
+                <span>
+                  {motionType.hasUnitDuration ? '按点击顺序确定发言顺序' : '发言名单'}
+                </span>
                 <span className="hint">已选 {speakerIds.length} 个代表团</span>
               </div>
+
+              {speakerIds.length > 0 ? (
+                <div className="motion-order-list">
+                  {speakerIds.map((id, index) => {
+                    const delegation = state.delegations.find((item) => item.id === id)
+                    return (
+                      <div className="motion-order-row" key={id}>
+                        <span className="motion-order-no">{index + 1}</span>
+                        <span className="motion-order-name">{delegation?.name ?? '已删除代表团'}</span>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => moveSpeaker(id, -1)}
+                          disabled={index === 0}
+                          aria-label="上移"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => moveSpeaker(id, 1)}
+                          disabled={index === speakerIds.length - 1}
+                          aria-label="下移"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => toggleSpeaker(id)}
+                          aria-label="移除"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
+
               <div className="recipient-grid">
                 {state.delegations.map((delegation) => {
-                  const checked = speakerIds.includes(delegation.id)
+                  const index = speakerIds.indexOf(delegation.id)
+                  const checked = index >= 0
                   return (
-                    <label
+                    <button
+                      type="button"
                       key={delegation.id}
                       className={`recipient-chip${checked ? ' checked' : ''}`}
+                      onClick={() => toggleSpeaker(delegation.id)}
+                      aria-pressed={checked}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSpeaker(delegation.id)}
-                      />
+                      {checked ? <span className="motion-order-badge">{index + 1}</span> : null}
                       <span>{delegation.name}</span>
-                    </label>
+                    </button>
                   )
                 })}
               </div>
+              {motionType.hasUnitDuration ? (
+                <p className="hint">点击代表团加入顺序；再次点击移除。开始动议后，每个单位需主席点按后才启动倒计时。</p>
+              ) : null}
             </div>
           ) : null}
         </section>
