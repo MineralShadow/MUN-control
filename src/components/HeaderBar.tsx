@@ -39,7 +39,7 @@ export function HeaderBar({ route }: { route: RoutePath }) {
             </span>
             <span className="brand-text">
               <span className="conference-title">{state.theme || '历史委员会'}</span>
-              <span className="conference-kicker">会场控制台 · CONFERENCE CONSOLE</span>
+              <span className="conference-kicker">MUN操作系统 · CONFERENCE CONSOLE</span>
               <span className="conference-subtitle mobile-only">{agendaText}</span>
             </span>
           </Link>
