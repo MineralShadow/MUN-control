@@ -61,6 +61,8 @@ export interface Settings {
   skipMajorityStep: boolean
   /** 是否允许普通代表上传个人文件；关闭时只有阁首可上传代表团文件 */
   allowPersonalFiles: boolean
+  /** 是否允许代表/阁首自己点击投票；关闭时由主席点名录入 */
+  allowDelegateVoting: boolean
 }
 
 export type FileScope = 'PERSONAL' | 'DELEGATION'
@@ -146,6 +148,15 @@ export interface VoteResult {
   votedAt: number
 }
 
+export interface LiveVote {
+  resolutionId: string
+  majority: MajorityRule
+  vetoIds: string[]
+  startedAt: number
+  /** DELEGATION 模式以 delegationId 为键；MEMBER 模式以 seatId 为键 */
+  ballots: Record<string, Ballot>
+}
+
 export interface Resolution {
   id: string
   title: string
@@ -170,6 +181,7 @@ export interface ConferenceState {
   motionTypes: MotionType[]
   activeMotion: ActiveMotion | null
   fileTypes: FileType[]
+  liveVote: LiveVote | null
   settings: Settings
   updatedAt: number
 }
@@ -308,4 +320,6 @@ export interface Bootstrap {
   myMembership: MyMembership | null
   revision: number
   serverNow: number
+  /** 当前服务端是否支持 SSE 实时推送（阿里云 Node 常驻服务为 true） */
+  stream: boolean
 }

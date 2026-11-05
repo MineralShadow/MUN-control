@@ -96,24 +96,54 @@ export function ConferenceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!data?.me) return
+    let closed = false
+    let interval: number | undefined
+    let source: EventSource | null = null
 
-    const interval = window.setInterval(() => {
-      // 后台标签页也轮询，才能接收事件通知；浏览器可能会自动降频。
-      void load(true)
-    }, pollMs)
+    const startPolling = () => {
+      if (interval !== undefined) return
+      interval = window.setInterval(() => {
+        // 后台标签页也轮询；浏览器可能会自动降频。
+        void load(true)
+      }, pollMs)
+    }
+    const stopPolling = () => {
+      if (interval === undefined) return
+      window.clearInterval(interval)
+      interval = undefined
+    }
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load(true)
     }
 
+    if (data.stream) {
+      source = new EventSource('/api/stream')
+      source.addEventListener('change', () => {
+        if (!closed) void load(true)
+      })
+      source.onopen = () => stopPolling()
+      source.onerror = () => {
+        if (closed) return
+        source?.close()
+        source = null
+        startPolling()
+      }
+    } else {
+      startPolling()
+    }
+
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
     return () => {
-      window.clearInterval(interval)
+      closed = true
+      stopPolling()
+      source?.close()
+      source = null
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [data?.me, load, pollMs])
+  }, [data?.me, data?.stream, load, pollMs])
 
   const setPollMs = useCallback((ms: number) => {
     if (!POLL_OPTIONS.includes(ms)) return

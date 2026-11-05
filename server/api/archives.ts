@@ -139,6 +139,7 @@ function trimmedState(
     currentSessionId: has('sessions') ? state.currentSessionId : null,
     currentTopicId: has('sessions') ? state.currentTopicId : null,
     resolutions: has('sessions') ? state.resolutions : [],
+    liveVote: has('sessions') ? state.liveVote : null,
     motionTypes: has('motions') ? state.motionTypes : createInitialState().motionTypes,
     activeMotion: has('motions') ? state.activeMotion : null,
     fileTypes: has('files') ? state.fileTypes : createInitialState().fileTypes,
@@ -389,6 +390,7 @@ export async function restoreArchive(
     ...(has('seats') ? { delegations: archivedState.delegations } : {}),
     ...(has('sessions')
       ? {
+          liveVote: archivedState.liveVote,
           sessions: archivedState.sessions,
           currentSessionId: archivedState.currentSessionId,
           currentTopicId: archivedState.currentTopicId,

@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import type { Action } from '../../src/state/reducer.ts'
 import { createId } from '../../src/lib/id.ts'
@@ -48,6 +49,8 @@ import {
 } from './time.ts'
 import { addExistingChair, createConference } from './conferences.ts'
 import { createArchive, deleteArchive, listArchives, restoreArchive } from './archives.ts'
+import { buildLiveVoteRows, liveVoteResult } from './voting.ts'
+import { notifyConference, subscribeConference } from './live.ts'
 import { clearConferenceData } from './admin.ts'
 import {
   getPushPublicKey,
@@ -68,6 +71,17 @@ app.use('*', async (c, next) => {
   if (isHealthRequest(c)) return next()
   await ensureDb()
   await next()
+})
+
+app.use('*', async (c, next) => {
+  await next()
+  if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS') {
+    return
+  }
+  const conferenceId = c.get('conferenceId' as never)
+  if (typeof conferenceId === 'string' && conferenceId) {
+    notifyConference(conferenceId)
+  }
 })
 
 app.get('/api/health', async (c) => {
@@ -140,6 +154,10 @@ const ALLOWED_ACTIONS = new Set([
   'resolution/rename',
   'resolution/delete',
   'resolution/finish',
+  'vote/open',
+  'vote/cast',
+  'vote/cancel',
+  'vote/finish',
   'motionType/add',
   'motionType/update',
   'motionType/delete',
@@ -356,6 +374,49 @@ app.get('/api/bootstrap', async (c) => {
     myMembership,
     revision: meeting.revision,
     serverNow: Date.now(),
+    stream: !process.env.VERCEL,
+  })
+})
+
+/* ---------------- 实时推送 ---------------- */
+
+app.get('/api/stream', async (c) => {
+  const user = await requireUser(c)
+  return streamSSE(c, async (stream) => {
+    let closed = false
+    let heartbeat: ReturnType<typeof setInterval> | null = null
+    let resolveAbort: (() => void) | null = null
+    const abortPromise = new Promise<void>((resolve) => {
+      resolveAbort = resolve
+    })
+
+    const sendChange = async () => {
+      if (closed) return
+      try {
+        await stream.writeSSE({ event: 'change', data: String(Date.now()) })
+      } catch {
+        closed = true
+      }
+    }
+
+    const unsubscribe = subscribeConference(user.conferenceId, () => {
+      void sendChange()
+    })
+    heartbeat = setInterval(() => {
+      if (closed) return
+      void stream.writeSSE({ event: 'ping', data: '1' })
+    }, 15000)
+
+    stream.onAbort(() => {
+      if (closed) return
+      closed = true
+      unsubscribe()
+      if (heartbeat) clearInterval(heartbeat)
+      resolveAbort?.()
+    })
+
+    await sendChange()
+    await abortPromise
   })
 })
 
@@ -375,6 +436,61 @@ app.post('/api/conference/action', async (c) => {
     console.error('[conference action]', error)
     throw new HTTPException(400, { message: '操作未能完成' })
   }
+})
+
+app.post('/api/vote/cast', async (c) => {
+  const user = await requireUser(c)
+  const body = await readJson(c)
+  const key = String(body.key ?? '')
+  const ballot = String(body.ballot ?? '')
+  if (!['YES', 'NO', 'ABSTAIN'].includes(ballot)) {
+    throw new HTTPException(400, { message: '票向无效' })
+  }
+  const meeting = await loadMeeting(user.conferenceId)
+  const live = meeting.state.liveVote
+  if (!live) throw new HTTPException(400, { message: '当前没有进行中的表决' })
+  const row = buildLiveVoteRows(meeting.state, live).find((item) => item.key === key)
+  if (!row || !row.present) throw new HTTPException(400, { message: '该席位/代表团不能投票' })
+
+  if (user.role !== 'chair') {
+    if (!meeting.state.settings.allowDelegateVoting) {
+      throw new HTTPException(403, { message: '主席团尚未开放自主投票' })
+    }
+    const membership = await getMyMembership(user)
+    if (!membership) throw new HTTPException(403, { message: '你还没有绑定席位' })
+    if (meeting.state.voteMode === 'DELEGATION') {
+      if (!membership.isHead || membership.delegationId !== key) {
+        throw new HTTPException(403, { message: '只有阁首可以代表本团投票' })
+      }
+    } else if (membership.seatId !== key) {
+      throw new HTTPException(403, { message: '只能投自己席位的票' })
+    }
+  }
+
+  const snapshot = await applyConferenceAction(user.conferenceId, {
+    type: 'vote/cast',
+    key,
+    ballot: ballot as 'YES' | 'NO' | 'ABSTAIN',
+  })
+  return c.json({ conference: snapshot.state, revision: snapshot.revision })
+})
+
+app.post('/api/vote/finish', async (c) => {
+  const user = await requireChair(c)
+  const meeting = await loadMeeting(user.conferenceId)
+  const live = meeting.state.liveVote
+  if (!live) throw new HTTPException(400, { message: '当前没有进行中的表决' })
+  const rows = buildLiveVoteRows(meeting.state, live)
+  const missing = rows.filter((row) => row.present && !live.ballots[row.key])
+  if (missing.length > 0) {
+    throw new HTTPException(400, { message: `还有 ${missing.length} 个席位/代表团未投票` })
+  }
+  const result = liveVoteResult(meeting.state, live)
+  const snapshot = await applyConferenceAction(user.conferenceId, {
+    type: 'vote/finish',
+    result,
+  })
+  return c.json({ conference: snapshot.state, revision: snapshot.revision })
 })
 
 /* ---------------- 时间 ---------------- */

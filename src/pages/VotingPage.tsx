@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast'
 import { ResolutionCard } from '../features/voting/ResolutionCard'
 import { VoteResult } from '../features/voting/VoteResult'
 import { VoteWizard } from '../features/voting/VoteWizard'
+import { LiveVotePanel } from '../features/voting/LiveVotePanel'
 import { createId } from '../lib/id'
 import { Link } from '../router'
 import { useConference } from '../state/ConferenceContext'
@@ -28,6 +29,9 @@ export function VotingPage() {
   const pendingCount = resolutions.filter((item) => item.status === 'PENDING').length
   const passedCount = resolutions.filter((item) => item.status === 'PASSED').length
   const failedCount = resolutions.filter((item) => item.status === 'FAILED').length
+  const liveResolution = state.liveVote
+    ? resolutions.find((item) => item.id === state.liveVote?.resolutionId) ?? null
+    : null
 
   function addResolution(event: FormEvent) {
     event.preventDefault()
@@ -111,6 +115,10 @@ export function VotingPage() {
           <span>未通过 {failedCount}</span>
         </div>
       </div>
+
+      {liveResolution && state.liveVote ? (
+        <LiveVotePanel liveVote={state.liveVote} resolution={liveResolution} />
+      ) : null}
 
       {canEdit ? (
         <form className="add-bar" onSubmit={addResolution}>

@@ -1,9 +1,11 @@
 import type {
   ActiveMotion,
   Author,
+  Ballot,
   ConferenceState,
   Delegation,
   FileType,
+  LiveVote,
   MotionType,
   Resolution,
   Seat,
@@ -44,6 +46,10 @@ export type Action =
   | { type: 'resolution/rename'; id: string; title: string }
   | { type: 'resolution/delete'; id: string }
   | { type: 'resolution/finish'; id: string; result: VoteResult }
+  | { type: 'vote/open'; liveVote: LiveVote }
+  | { type: 'vote/cast'; key: string; ballot: Ballot }
+  | { type: 'vote/cancel' }
+  | { type: 'vote/finish'; result: VoteResult }
   | { type: 'motionType/add'; motionType: MotionType }
   | { type: 'motionType/update'; motionType: MotionType }
   | { type: 'motionType/delete'; id: string }
@@ -457,6 +463,44 @@ function baseReducer(state: ConferenceState, action: Action): ConferenceState {
         },
       }
     }
+
+    case 'vote/open':
+      return { ...state, liveVote: { ...action.liveVote } }
+
+    case 'vote/cast':
+      if (!state.liveVote) return state
+      return {
+        ...state,
+        liveVote: {
+          ...state.liveVote,
+          ballots: (() => {
+            const next = { ...state.liveVote.ballots }
+            if (next[action.key] === action.ballot) delete next[action.key]
+            else next[action.key] = action.ballot
+            return next
+          })(),
+        },
+      }
+
+    case 'vote/cancel':
+      return state.liveVote ? { ...state, liveVote: null } : state
+
+    case 'vote/finish':
+      return {
+        ...state,
+        liveVote: null,
+        resolutions: state.liveVote
+          ? state.resolutions.map((item) =>
+              item.id === state.liveVote?.resolutionId
+                ? {
+                    ...item,
+                    status: action.result.passed ? 'PASSED' : 'FAILED',
+                    result: action.result,
+                  }
+                : item,
+            )
+          : state.resolutions,
+      }
 
     case 'fileType/add':
       return { ...state, fileTypes: [...state.fileTypes, action.fileType] }

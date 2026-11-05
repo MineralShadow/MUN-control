@@ -6,6 +6,7 @@ import type {
   BallotRecord,
   ConferenceState,
   Delegation,
+  LiveVote,
   MajorityRule,
   MotionType,
   Resolution,
@@ -193,6 +194,31 @@ function normalizeResolution(value: unknown): Resolution | null {
   }
 }
 
+function normalizeLiveVote(value: unknown): LiveVote | null {
+  if (!isRecord(value)) return null
+  const resolutionId = asText(value.resolutionId)
+  if (!resolutionId) return null
+  const majority =
+    value.majority === 'TWO_THIRDS' || value.majority === 'UNANIMOUS'
+      ? value.majority
+      : 'SIMPLE'
+  const rawBallots = isRecord(value.ballots) ? value.ballots : {}
+  const ballots: Record<string, Ballot> = {}
+  for (const [key, ballot] of Object.entries(rawBallots)) {
+    if (ballot === 'YES' || ballot === 'NO' || ballot === 'ABSTAIN') {
+      ballots[key] = ballot
+    }
+  }
+  const rawVetoes = Array.isArray(value.vetoIds) ? value.vetoIds : []
+  return {
+    resolutionId,
+    majority,
+    vetoIds: rawVetoes.filter((id): id is string => typeof id === 'string'),
+    startedAt: toInt(value.startedAt, Date.now()),
+    ballots,
+  }
+}
+
 function normalizeMotionType(value: unknown, index: number): MotionType | null {
   if (!isRecord(value)) return null
   return {
@@ -359,6 +385,10 @@ export function normalizeState(input: unknown): ConferenceState | null {
       typeof rawSettings.allowPersonalFiles === 'boolean'
         ? rawSettings.allowPersonalFiles
         : DEFAULT_SETTINGS.allowPersonalFiles,
+    allowDelegateVoting:
+      typeof rawSettings.allowDelegateVoting === 'boolean'
+        ? rawSettings.allowDelegateVoting
+        : DEFAULT_SETTINGS.allowDelegateVoting,
   }
 
   return {
@@ -374,6 +404,7 @@ export function normalizeState(input: unknown): ConferenceState | null {
     resolutions,
     motionTypes: finalMotionTypes,
     activeMotion: normalizeActiveMotion(input.activeMotion),
+    liveVote: normalizeLiveVote(input.liveVote),
     fileTypes: normalizeFileTypes(input.fileTypes),
     settings,
     updatedAt: toInt(input.updatedAt, Date.now()),

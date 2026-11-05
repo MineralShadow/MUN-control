@@ -183,6 +183,7 @@ export async function getSessionUser(c: Context): Promise<SessionUser | null> {
 export async function requireUser(c: Context): Promise<SessionUser> {
   const user = await getSessionUser(c)
   if (!user) throw new HTTPException(401, { message: '请先登录' })
+  c.set('conferenceId' as never, user.conferenceId as never)
   return user
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from '../../components/Modal'
 import { useConfirm } from '../../components/ConfirmDialog'
 import { useToast } from '../../components/Toast'
@@ -19,6 +19,7 @@ import type {
   Resolution,
   VoteResult as VoteResultData,
 } from '../../types'
+import { ParliamentChart } from '../../components/ParliamentChart'
 import { VoteCasting } from './VoteCasting'
 import { VoteResult } from './VoteResult'
 
@@ -63,6 +64,23 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
 
   const step: WizardStep = result ? 'result' : steps[Math.min(stepIndex, steps.length - 1)]
 
+  useEffect(() => {
+    if (!state.settings.allowDelegateVoting) return
+    if (step !== 'cast' || state.liveVote) return
+    dispatch({
+      type: 'vote/open',
+      liveVote: {
+        resolutionId: resolution.id,
+        majority,
+        vetoIds,
+        startedAt: Date.now(),
+        ballots: {},
+      },
+    })
+    toast('已发起自主投票，代表可自行点击投票', 'success')
+    onClose()
+  }, [dispatch, majority, onClose, resolution.id, state.liveVote, state.settings.allowDelegateVoting, step, toast, vetoIds])
+
   const votedCount = present.filter((delegation) => Boolean(ballots[delegation.id])).length
   const allVoted = present.length > 0 && votedCount === present.length
 
@@ -74,11 +92,27 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
     veto: vetoIds.includes(delegation.id),
   }))
   const tally = tallyBallots(records)
+  const previewResult = toVoteResult(majority, vetoIds, records)
   const vetoNo = state.delegations.filter(
     (delegation) => vetoIds.includes(delegation.id) && ballots[delegation.id] === 'NO',
   )
 
   function goNext() {
+    if (steps[stepIndex + 1] === 'cast' && state.settings.allowDelegateVoting) {
+      dispatch({
+        type: 'vote/open',
+        liveVote: {
+          resolutionId: resolution.id,
+          majority,
+          vetoIds,
+          startedAt: Date.now(),
+          ballots: {},
+        },
+      })
+      toast('已发起自主投票，代表可自行点击投票', 'success')
+      onClose()
+      return
+    }
     setStepIndex((index) => Math.min(index + 1, steps.length - 1))
   }
 
@@ -286,6 +320,9 @@ export function VoteWizard({ resolution, onClose }: VoteWizardProps) {
 
       {step === 'cast' ? (
         <div className="casting-layout">
+          <div className="vote-live-chart">
+            <ParliamentChart result={previewResult} />
+          </div>
           <div className="casting-list">
             <div className="casting-head">
               <div>

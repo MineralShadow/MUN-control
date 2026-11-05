@@ -96,6 +96,30 @@ export function SettingsPage() {
 
       <section className="settings-card">
         <div className="settings-card-head">
+          <h2>自主投票</h2>
+          <p>开启后，表决期间代表可以自行点击投票，不必由主席逐一录入。</p>
+        </div>
+        <div className="setting-row">
+          <div className="setting-copy">
+            <h3>允许代表自主投票</h3>
+            <p>
+              代表团计票时由阁首投本团一票；代表计票时每位代表投自己席位的一票。
+              主席始终可以代替任何席位投票。
+            </p>
+          </div>
+          <Toggle
+            checked={settings.allowDelegateVoting}
+            onChange={(checked) =>
+              dispatch({ type: 'settings/patch', patch: { allowDelegateVoting: checked } })
+            }
+            label="允许代表自主投票"
+            disabled={!canEdit}
+          />
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-head">
           <h2>默认表决要求</h2>
           <p>新建表决时默认选中的多数规则，仍可在表决前更改。</p>
         </div>

@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: Settings = {
   skipVetoStep: false,
   skipMajorityStep: false,
   allowPersonalFiles: false,
+  allowDelegateVoting: false,
 }
 
 export function createInitialState(): ConferenceState {
@@ -33,6 +34,7 @@ export function createInitialState(): ConferenceState {
     motionTypes: defaultMotionTypes(),
     activeMotion: null,
     fileTypes: defaultFileTypes(),
+    liveVote: null,
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: Date.now(),
   }

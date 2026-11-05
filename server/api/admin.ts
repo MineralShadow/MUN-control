@@ -51,6 +51,7 @@ export async function clearConferenceData(
       currentSessionId: null,
       currentTopicId: null,
       resolutions: [],
+      liveVote: null,
     }
   }
   if (has('motions')) {
